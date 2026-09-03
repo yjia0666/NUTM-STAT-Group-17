@@ -1,0 +1,49 @@
+---
+title: "Datacleaning again"
+author: "Isabelle Huynh 540706002"
+date: "2026-09-03"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(readr)
+library(dplyr)
+library(readr)
+library(stringr)
+
+
+
+
+# Read in the two CSV files
+df1 <- read_csv("~/Desktop/STAT3888 Project 1/NHS 11-12/AHSnhs11bsp.csv")   
+                # e.g. contains ABSLID, sex
+df2 <- read_csv("~/Desktop/STAT3888 Project 1/NHS 11-12/AHSnhs11bbi.csv")   
+# e.g. contains ABSLID, chronic kidney disease status
+
+
+# Remove the "NHS11B" prefix from ABSLID in both files
+df1 <- df1 %>%
+  mutate(ABSLID = str_remove(ABSLID, "^NHS11B"))
+
+df2 <- df2 %>%
+  mutate(ABSLID = str_remove(ABSLID, "^NHS11B"))
+
+# Now merge as before
+merged_df <- inner_join(df1, df2, by = "ABSLID")
+
+# Select just the columns you need (adjust column names to match your data)
+selected_df <- merged_df %>%
+  select(ABSLID, SEX, EGFRKDSA, ACRNTR)   # replace 'sex' and 'ckd_status' with your actual column names
+
+# Count how many people of each sex have CKD vs don't
+sex_ckd_counts <- selected_df %>%
+  group_by(EGFRKDSA, SEX) %>%
+  summarise(n = n(), .groups = "drop")
+
+print(sex_ckd_counts)
+
+
+
+```
+
