@@ -12,8 +12,40 @@ library(dplyr)
 library(readr)
 library(stringr)
 
+files <- list.files(
+  "~/Desktop/STAT3888 Project 1/NHS 11-12", # Modify the location
+  pattern = "^AHS.*\\.csv$", # # Regex : modify this to filter different files
+  full.names = TRUE
+)
+variable_catalogue <- data.frame()
 
+for (file in unique(files)) {
+  
+  vars <- names(
+    read_csv(
+      file,
+      n_max = 0, # Read column names
+      show_col_types = FALSE
+    )
+  )
+  
+  temp <- data.frame( # temporary data frame for one file
+    File = basename(file),
+    Variable = vars
+  )
+  
+  variable_catalogue <- bind_rows(
+    variable_catalogue,
+    temp
+  )
+}
+variable_catalogue %>%
+  filter(Variable == "ALCUSUQ2") # alc frequency in last 12 months 
+  filter(Variable == "FEMLSBC")
 
+```
+
+```{r}
 
 # Read in the two CSV files
 df1 <- read_csv("~/Desktop/STAT3888 Project 1/NHS 11-12/AHSnhs11bsp.csv")   
@@ -30,20 +62,49 @@ df2 <- df2 %>%
   mutate(ABSLID = str_remove(ABSLID, "^NHS11B"))
 
 # Now merge as before
-merged_df <- inner_join(df1, df2, by = "ABSLID")
+merged_df <- inner_join(df1, df2, by = c("ABSLID", "ABSPID"))
 
 # Select just the columns you need (adjust column names to match your data)
 selected_df <- merged_df %>%
-  select(ABSLID, SEX, EGFRKDSA, ACRNTR)   # replace 'sex' and 'ckd_status' with your actual column names
+  select(ABSLID, SEX, EGFRKDSA, ACRNTR, ALCUSUQ2, FEMLSBC)   # replace 'sex' and 'ckd_status' with your actual column names
 
 # Count how many people of each sex have CKD vs don't
 sex_ckd_counts <- selected_df %>%
-  group_by(EGFRKDSA, SEX) %>%
+  group_by(EGFRKDSA, SEX ) %>%
+  summarise(n = n(), .groups = "drop")
+
+menopause_counts <- selected_df %>%
+  group_by(FEMLSBC) %>%
   summarise(n = n(), .groups = "drop")
 
 print(sex_ckd_counts)
 
-
+#Data cleaning
+#There is a duplicate of Row 12909/12910 with ID NHS11B0000769
+# NHS11B0004830 appears to 
+```
 
 ```
+```{r}
+library(ggplot2)
+theme_set(theme_classic())
+
+# Histogram on a Continuous (Numeric) Variable
+g <- ggplot(selected_df, aes(EGFRKDSA)) + scale_fill_brewer(palette = "Spectral")
+
+g + geom_histogram(aes(fill=SEX), 
+                   binwidth = .1, 
+                   col="black", 
+                   size=.1) +  # change binwidth
+  labs(title="Histogram with Auto Binning", 
+       subtitle="Engine Displacement across Vehicle Classes")  
+
+g + geom_histogram(aes(fill=SEX), 
+                   bins=5, 
+                   col="black", 
+                   size=.1) +   # change number of bins
+  labs(title="Histogram with Fixed Bins", 
+       subtitle="Engine Displacement across Vehicle Classes") 
+```
+
 
