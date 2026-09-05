@@ -12,6 +12,7 @@ library(dplyr)
 library(readr)
 library(stringr)
 
+<<<<<<< HEAD
 files <- list.files(
   "~/Desktop/STAT3888 Project 1/NHS 11-12", # Modify the location
   pattern = "^AHS.*\\.csv$", # # Regex : modify this to filter different files
@@ -46,6 +47,10 @@ variable_catalogue %>%
 ```
 
 ```{r}
+=======
+
+
+>>>>>>> a9458e70205f40ef2f6e94bc81d83b17dee79662
 
 # Read in the two CSV files
 df1 <- read_csv("~/Desktop/STAT3888 Project 1/NHS 11-12/AHSnhs11bsp.csv")   
@@ -62,6 +67,7 @@ df2 <- df2 %>%
   mutate(ABSLID = str_remove(ABSLID, "^NHS11B"))
 
 # Now merge as before
+<<<<<<< HEAD
 merged_df <- inner_join(df1, df2, by = c("ABSLID", "ABSPID"))
 
 # Select just the columns you need (adjust column names to match your data)
@@ -75,10 +81,22 @@ sex_ckd_counts <- selected_df %>%
 
 menopause_counts <- selected_df %>%
   group_by(FEMLSBC) %>%
+=======
+merged_df <- inner_join(df1, df2, by = "ABSLID")
+
+# Select just the columns you need (adjust column names to match your data)
+selected_df <- merged_df %>%
+  select(ABSLID, SEX, EGFRKDSA, ACRNTR)   # replace 'sex' and 'ckd_status' with your actual column names
+
+# Count how many people of each sex have CKD vs don't
+sex_ckd_counts <- selected_df %>%
+  group_by(EGFRKDSA, SEX) %>%
+>>>>>>> a9458e70205f40ef2f6e94bc81d83b17dee79662
   summarise(n = n(), .groups = "drop")
 
 print(sex_ckd_counts)
 
+<<<<<<< HEAD
 #Data cleaning
 #There is a duplicate of Row 12909/12910 with ID NHS11B0000769
 # NHS11B0004830 appears to 
@@ -108,3 +126,9 @@ g + geom_histogram(aes(fill=SEX),
 ```
 
 
+=======
+
+
+```
+
+>>>>>>> a9458e70205f40ef2f6e94bc81d83b17dee79662
