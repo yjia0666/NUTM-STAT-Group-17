@@ -8,13 +8,14 @@ library(readr)
 library(dplyr)
 library(stringr)
 library(tidyverse)
+library(here)
 ```
 
 
 ```{r}
-df1 <- read_csv("D:/usyd/26s2/STAT3888/ZIPallFiles/AHSnhs11bsp.csv")
-df2 <- read_csv("D:/usyd/26s2/STAT3888/ZIPallFiles/AHSnhs11bbi.csv")
-
+df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
+df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
+                
 df <- df1 %>%
   select(ABSLID, ABSPID, SEX) %>%
   left_join(
@@ -91,9 +92,7 @@ ggplot(ckd_prop, aes(x = factor(CKD),
 
 
 ```{r}
-alcohol_type <- read_csv(
-  "D:/usyd/26s2/STAT3888/ZIPallFiles/AHSnhs11b14.csv"
-) %>%
+alcohol_type <- read.csv(here("data", "AHSnhs11b14.csv"), stringsAsFactors = TRUE) %>%
   select(
     ABSLID,
     ABSPID,
