@@ -7,11 +7,12 @@ date: "2026-09-03"
 ```{r}
 library(readr)
 library(dplyr)
+library(here)
 ```
 
 ```{r}
 files <- list.files(
-  "D:/usyd/26s2/STAT3888/ZIPallFiles", # Modify the location
+  here("data"), # Modify the location
   pattern = "^AHS.*\\.csv$", # # Regex : modify this to filter different files
   full.names = TRUE
 )
@@ -48,6 +49,6 @@ for (file in unique(files)) {
 ```{r}
 # Find the location of the variable
 variable_catalogue %>%
-  filter(Variable == "EGFRKDSA") # Or use regex: grepl("EXREG", Variable)
+  filter(Variable == "SMKSTAT") # Or use regex: grepl("EXREG", Variable)
 ```
 

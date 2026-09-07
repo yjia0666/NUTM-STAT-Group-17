@@ -17,7 +17,7 @@ df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
                 
 df <- df1 %>%
-  select(ABSLID, ABSPID, SEX) %>%
+  select(ABSLID, ABSPID, SEX, SMKSTAT) %>%
   left_join(
     df2 %>% select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB),
     by = c("ABSLID", "ABSPID")
@@ -60,6 +60,12 @@ ckd_data <- df %>%
       EGFRIMP == 1 ~ "Normal",
       EGFRIMP == 2 ~ "Impaired",
       EGFRIMP %in% c(0, 8) ~ NA_character_
+    ),
+    smoker_status = case_when(
+      SMKSTAT == 5 ~ "Never smoker",
+      SMKSTAT == 4 ~ "Ex-smoker",
+      SMKSTAT %in% c(1, 2, 3) ~ "Current smoker",
+      SMKSTAT == 0 ~ NA_character_
     )
   )
 ```
@@ -251,7 +257,6 @@ quantity_prop <- df_final %>%
     n = n(),
     .groups = "drop"
   )
-
 ```
 
 
@@ -277,5 +282,41 @@ ggplot(
 
 ```{r}
 quantity_prop
+```
+
+
+```{r}
+smoker_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(smoker_status)
+  ) %>%
+  group_by(SEX, smoker_status) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(
+  smoker_prop,
+  aes(
+    x = smoker_status,
+    y = proportion_CKD,
+    fill = SEX
+  )
+) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Smoking status",
+    y = "Proportion with CKD",
+    fill = "Sex"
+  ) +
+  theme_minimal()
+
 ```
 
