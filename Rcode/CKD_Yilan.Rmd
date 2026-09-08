@@ -19,7 +19,7 @@ df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
 df <- df1 %>%
   select(ABSLID, ABSPID, SEX, SMKSTAT) %>%
   left_join(
-    df2 %>% select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB),
+    df2 %>% select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB, VDLCMRGT, FOLATREB, B12RESB, FERRCRPB),
     by = c("ABSLID", "ABSPID")
   )
 ```
@@ -31,6 +31,10 @@ df1 %>%
   filter(n > 1)
 ```
 
+```{r}
+# Check the number of observations in each category
+table(df$FERRCRPB, useNA = "ifany")
+```
 
 
 ```{r}
@@ -40,6 +44,7 @@ df %>%
 
 
 ```{r}
+# Some categories were combined to simplify EDA
 ckd_data <- df %>%
   mutate(
     SEX = case_when(
@@ -66,7 +71,37 @@ ckd_data <- df %>%
       SMKSTAT == 4 ~ "Ex-smoker",
       SMKSTAT %in% c(1, 2, 3) ~ "Current smoker",
       SMKSTAT == 0 ~ NA_character_
-    )
+    ),
+    Folate = case_when(
+      FOLATREB %in% 1:3 ~ "<15 nmol/L",
+      FOLATREB %in% 4:5 ~ "15–<25 nmol/L",
+      FOLATREB %in% 6:7 ~ "25–<35 nmol/L",
+      FOLATREB %in% 8:9 ~ "35–<45 nmol/L",
+      FOLATREB == 10 ~ "≥45 nmol/L",
+      FOLATREB %in% c(97, 98) ~ NA_character_
+    ),
+    Vitamin_B12 = case_when(
+    B12RESB %in% 1:3 ~ "<220 pmol/L",
+    B12RESB == 4 ~ "220–<300 pmol/L",
+    B12RESB == 5 ~ "300–<400 pmol/L",
+    B12RESB %in% 6:7 ~ "400–<600 pmol/L",
+    B12RESB %in% 8:9 ~ "≥600 pmol/L",
+    B12RESB %in% c(97, 98) ~ NA_character_
+  ),
+  Ferritin = case_when(
+    FERRCRPB %in% 1:4 ~ "<30 µg/L",
+    FERRCRPB == 5 ~ "30–<50 µg/L",
+    FERRCRPB == 6 ~ "50–<150 µg/L",
+    FERRCRPB %in% 7:8 ~ "150–<300 µg/L",
+    FERRCRPB %in% 9:11 ~ "≥300 µg/L",
+    FERRCRPB %in% c(97, 98) ~ NA_character_
+  ),
+  Vitamin_D = case_when(
+  VDLCMRGT == 1 ~ "Adequate (≥50 nmol/L)",
+  VDLCMRGT == 2 ~ "Mild deficiency (30–49 nmol/L)",
+  VDLCMRGT == 3 ~ "Moderate/severe deficiency (<30 nmol/L)",
+  VDLCMRGT %in% c(0, 8) ~ NA_character_
+)
   )
 ```
 
@@ -94,6 +129,7 @@ ggplot(ckd_prop, aes(x = factor(CKD),
     fill = "Sex"
   ) +
   theme_minimal()
+ggsave(here("figures", "sex_CKD.png"))
 ```
 
 
@@ -234,7 +270,7 @@ ggplot(
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
-
+ggsave(here("figures", "alcohol_type_CKD.png"))
 ```
 
 ```{r}
@@ -277,7 +313,7 @@ ggplot(
     fill = "Sex"
   ) +
   theme_minimal()
-
+ggsave(here("figures", "alcohol_quantity_CKD.png"))
 ```
 
 ```{r}
@@ -317,6 +353,51 @@ ggplot(
     fill = "Sex"
   ) +
   theme_minimal()
+ggsave(here("figures", "smoking_CKD.png"))
+```
 
+```{r}
+micro_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD)
+  ) %>%
+  select(SEX, CKD, Folate, Vitamin_B12, Ferritin, Vitamin_D) %>%
+  pivot_longer(
+    cols = c(Folate, Vitamin_B12, Ferritin, Vitamin_D),
+    names_to = "micronutrient",
+    values_to = "category"
+  ) %>%
+  filter(!is.na(category)) %>%
+  group_by(micronutrient, SEX, category) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(
+  micro_prop,
+  aes(
+    x = category,
+    y = proportion_CKD,
+    fill = SEX
+  )
+) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ micronutrient, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = NULL,
+    y = "Proportion with CKD",
+    fill = "Sex"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+ggsave(here("figures", "micronutrient_CKD.png"))
 ```
 
