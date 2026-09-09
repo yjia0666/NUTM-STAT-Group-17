@@ -202,7 +202,7 @@ alcohol_type <- alcohol_type %>%
       ALCTYPT == 12 ~ "Cider",
       ALCTYPT == 13 ~ "Cocktails",
       ALCTYPT == 14 ~ "Other",
-      ALCTYPT == 0 ~ "NA_character_"
+      ALCTYPT == 0 ~ NA_character_
     )
   )
 ```
@@ -242,8 +242,11 @@ df_final <- ckd_data %>%
 
 ```{r}
 clean_data <- na.omit(df_final)
+<<<<<<< HEAD
 
 #Seems like 4 observations were lost after alcohol variables were added 
+=======
+>>>>>>> 7f667d18c7cad7b2e2f7793c69ef9e12256a1da4
 
 prop.table(table(clean_data$ACRNTR)) #Albuminuria status
 table(clean_data$ACRNTR)
@@ -273,6 +276,11 @@ prop.table(table(clean_data$VDLCMRGT))
 #New hack, can just view the clean_data and there's a summary page on proportions
 
 ```
+
+```{r}
+nrow(clean_data)
+```
+
 
 ```{r}
 alcohol_type_prop <- df_final %>%
