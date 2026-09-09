@@ -17,7 +17,7 @@ df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
                 
 df <- df1 %>%
-  select(ABSLID, ABSPID, SEX) %>%
+  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B) %>%
   left_join(
     df2 %>% select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB),
     by = c("ABSLID", "ABSPID")
@@ -278,3 +278,4 @@ ggplot(
 ```{r}
 quantity_prop
 ```
+
