@@ -241,7 +241,9 @@ df_final <- ckd_data %>%
 ```
 
 ```{r}
-clean_data <- na.omit(ckd_data)
+clean_data <- na.omit(df_final)
+
+#Seems like 4 observations were lost after alcohol variables were added 
 
 prop.table(table(clean_data$ACRNTR)) #Albuminuria status
 table(clean_data$ACRNTR)
@@ -252,7 +254,12 @@ prop.table(table(clean_data$ACRIPA))
 table(clean_data$EGFRIMP) #eGFR status
 prop.table(table(clean_data$EGFRIMP))
 
+table(clean_data$EGFRKDSA) #ckd status
+prop.table(table(clean_data$EGFRKDSA))
+
+table(clean_data$CKD)
 prop.table(table(clean_data$CKD))
+
 
 prop.table(table(clean_data$SMKSTAT))
 prop.table(table(clean_data$SMKAGEDB))
@@ -298,6 +305,7 @@ alcohol_type_prop <- df_final %>%
 ```
 
 ```{r}
+
 ggplot(
   alcohol_type_prop %>% filter(CKD == "CKD"),
   aes(
@@ -307,6 +315,8 @@ ggplot(
   )
 ) +
   geom_col(position = "dodge") +
+  
+  scale_x_discrete(labels = c("Champagne", "Cider", "Cocktails", "Fortified Wine", "Full strength Beer", "Liquers", "Low alcoholic beer", "Low alcoholic wine", "Mid strength Beer","Red Wine","Ready to drink spirits/liquers","Spirits","White Wine" )) +
   scale_y_continuous(labels = scales::percent) +
   labs(
     x = "Alcohol type",
@@ -318,6 +328,7 @@ ggplot(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
 ggsave(here("figures", "alcohol_type_CKD.png"))
+
 ```
 
 ```{r}
@@ -367,15 +378,15 @@ ggsave(here("figures", "alcohol_quantity_CKD.png"))
 quantity_prop
 ```
 
-
 ```{r}
-smoker_prop <- df_final %>%
+smoker_status_prop <- df_final %>%
   filter(
     !is.na(SEX),
     !is.na(CKD),
-    !is.na(smoker_status)
+    !is.na(smoker_status),
+    !is.na(daily_smoke),
   ) %>%
-  group_by(SEX, smoker_status) %>%
+  group_by(SEX, daily_smoke) %>%
   summarise(
     proportion_CKD = mean(CKD == "CKD"),
     n = n(),
@@ -385,28 +396,46 @@ smoker_prop <- df_final %>%
 
 ```{r}
 ggplot(
-  smoker_prop,
+  smoker_status_prop,
   aes(
-    x = smoker_status,
+    x = daily_smoke,
     y = proportion_CKD,
     fill = SEX
   )
 ) +
   geom_col(position = "dodge") +
+  scale_x_discrete(labels = c("<10 years", "10-29 years", "30 years and over", "Never smoked daily")) +
   scale_y_continuous(labels = scales::percent) +
   labs(
-    x = "Smoking status",
+    x = "Daily Smoking Duration",
     y = "Proportion with CKD",
     fill = "Sex"
   ) +
   theme_minimal()
-ggsave(here("figures", "smoking_CKD.png"))
+ggsave(here("figures", "smoking_daily_CKD.png"))
 ```
+
+```{r}
+smoker_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(smoker_status),
+  ) %>%
+  group_by(SEX, smoker_status) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+```
+
+
 ```{r}
 ggplot(
   smoker_prop,
   aes(
-    x = daily_smoke,
+    x = smoker_status,
     y = proportion_CKD,
     fill = SEX
   )
@@ -443,6 +472,8 @@ micro_prop <- df_final %>%
     .groups = "drop"
   )
 ```
+
+
 
 ```{r}
 ggplot(
