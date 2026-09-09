@@ -52,6 +52,6 @@ for (file in unique(file_list)) {
 ```{r}
 # Find the location of the variable
 variable_catalogue %>%
-  filter(Variable == "SMKSTAT") # Or use regex: grepl("EXREG", Variable)
+  filter(Variable == "SMKAGEDB") # Or use regex: grepl("EXREG", Variable)
 ```
 
