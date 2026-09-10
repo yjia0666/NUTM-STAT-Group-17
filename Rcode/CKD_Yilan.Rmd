@@ -17,9 +17,12 @@ df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
                 
 df <- df1 %>%
+  filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
   select(ABSLID, ABSPID, SEX, SMKSTAT, SMKAGEDB) %>%
   left_join(
-    df2 %>% select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB, VDLCMRGT, FOLATREB, B12RESB, FERRCRPB),
+    df2 %>%
+    filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
+    select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB, VDLCMRGT, FOLATREB, B12RESB, FERRCRPB),
     by = c("ABSLID", "ABSPID")
   )
 ```
@@ -116,10 +119,7 @@ ckd_data <- df %>%
   VDLCMRGT == 3 ~ "Moderate/severe deficiency (<30 nmol/L)",
   VDLCMRGT %in% c(0, 8) ~ NA_character_
 )
-
   )
-
-
 ```
 
 
@@ -243,10 +243,13 @@ df_final <- ckd_data %>%
 ```{r}
 clean_data <- na.omit(df_final)
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 #Seems like 4 observations were lost after alcohol variables were added 
 =======
 >>>>>>> 7f667d18c7cad7b2e2f7793c69ef9e12256a1da4
+=======
+>>>>>>> de834a8fbbb603080e25d3c0d79deace709a81d5
 
 prop.table(table(clean_data$ACRNTR)) #Albuminuria status
 table(clean_data$ACRNTR)
@@ -274,7 +277,7 @@ prop.table(table(clean_data$FERRCRPB))
 prop.table(table(clean_data$VDLCMRGT))
 
 #New hack, can just view the clean_data and there's a summary page on proportions
-
+nrow(clean_data)
 ```
 
 ```{r}
