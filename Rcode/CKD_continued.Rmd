@@ -3,3 +3,147 @@ title: "CKD_continued"
 output: html_document
 ---
 
+```{r}
+df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
+df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
+
+df3 <- read.csv(here("data", "inp13bsp.csv"), stringsAsFactors = TRUE)
+df4 <- read.csv(here("data", "inp13bbi.csv"), stringsAsFactors = TRUE)
+
+                
+df <- df1 %>%
+  select(ABSLID, ABSPID, SEX, SMKSTAT) %>%
+  left_join(
+    df2 %>% select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB),
+    by = c("ABSLID", "ABSPID")
+  )
+
+#Aboriginal/Torres Strait Islanders Survey
+
+df_2 <- df3 %>%
+  select(ABSHID, ABSGID, SEX, SMKSTAT) %>%
+  left_join(
+    df4 %>% select(ABSHID, ABSGID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB),
+    by = c("ABSHID", "ABSGID")
+  ) %>%
+  mutate(col1 = paste(col1, col2, sep = " "))
+
+
+merged_df <- left_join(df_1, df_2, by = c("ID_dataset1" = "ID_dataset2"))
+
+alcohol_type <- read.csv(here("data", "AHSnhs11b14.csv"), stringsAsFactors = TRUE) %>%
+  select(
+    ABSLID,
+    ABSPID,
+    ABSBID,
+    ABSTID,
+    ALCTYPT,
+    TOTPALCR
+  )
+
+alcohol_quantity <- df1 %>%
+  select(
+    ABSLID,
+    ABSPID,
+    ALINWKSD
+  ) %>%
+  
+  mutate(
+    alcohol_quantity = case_when(
+      ALINWKSD == 97 ~ 0,          # Did not drink last week
+      ALINWKSD >= 0 & ALINWKSD <= 96 ~ ALINWKSD,  # Actual alcohol intake
+      ALINWKSD %in% c(98, 99) ~ NA_real_  # Not stated/unknown or not applicable
+    )
+  )
+
+alcohol_type <- alcohol_type %>%
+  mutate(
+    alcohol_type = case_when(
+      ALCTYPT == 1 ~ "Low_alcohol_beer",
+      ALCTYPT == 2 ~ "Mid_strength_beer",
+      ALCTYPT == 3 ~ "Full_strength_beer",
+      ALCTYPT == 4 ~ "White_wine",
+      ALCTYPT == 5 ~ "Red_wine",
+      ALCTYPT == 6 ~ "Low_alcohol_wine",
+      ALCTYPT == 7 ~ "Champagne_sparkling_wine",
+      ALCTYPT == 8 ~ "RTD_spirits_liqueur",
+      ALCTYPT == 9 ~ "Liqueurs",
+      ALCTYPT == 10 ~ "Spirits",
+      ALCTYPT == 11 ~ "Fortified_wine",
+      ALCTYPT == 12 ~ "Cider",
+      ALCTYPT == 13 ~ "Cocktails",
+      ALCTYPT == 14 ~ "Other",
+      ALCTYPT == 0 ~ NA_character_
+    )
+  )
+
+# Keep one record for each participant and alcohol type
+alcohol_type_person <- alcohol_type %>%
+  filter(!is.na(alcohol_type)) %>%
+  distinct(ABSLID, ABSPID, alcohol_type) %>%
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = alcohol_type,
+    values_from = value,
+    values_fill = 0
+  )
+
+# Combine alcohol type and alcohol quantity at the participant level
+alcohol_person <- alcohol_quantity %>%
+  left_join(
+    alcohol_type_person,
+    by = c("ABSLID", "ABSPID")
+  )
+
+# Add alcohol information to the main participant-level dataset
+df_final <- ckd_data %>%
+  left_join(
+    alcohol_person,
+    by = c("ABSLID", "ABSPID")
+  )
+
+#Note Alcohol_person in df_final only includes people who drank in the last week
+
+clean_data <- na.omit(df_final)
+
+```
+
+```{r}
+# Duplicate id
+df1 %>%
+  count(ABSLID, ABSPID) %>%
+  filter(n > 1)
+```
+
+
+
+```{r}
+df %>%
+  count(EGFRKDSA, SEX)
+```
+
+
+```{r}
+ckd_data <- df %>%
+  mutate(
+    SEX = case_when(
+      SEX == 1 ~ "Male",
+      SEX == 2 ~ "Female",
+    ),
+    CKD = case_when(
+      EGFRKDSA == 1 ~ "No CKD",
+      EGFRKDSA %in% 2:6 ~ "CKD",
+      EGFRKDSA %in% c(0, 8) ~ NA_character_
+    ),
+    ACR_status = case_when(
+      ACRNTR == 1 ~ "No albuminuria",
+      ACRNTR %in% c(2, 3) ~ "Albuminuria",
+      ACRNTR %in% c(0, 8) ~ NA_character_
+    ),
+    eGFR_status = case_when(
+      EGFRIMP == 1 ~ "Normal",
+      EGFRIMP == 2 ~ "Impaired",
+      EGFRIMP %in% c(0, 8) ~ NA_character_
+    )
+  )
+```
