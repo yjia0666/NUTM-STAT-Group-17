@@ -458,3 +458,17 @@ ggplot(
   )
 ggsave(here("figures", "new_micronutrient_CKD.png"))
 ```
+
+```{r}
+df_filter <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(alcohol_quantity),
+    !is.na(Red_wine)
+  ) %>%
+  mutate(
+    CKD = ifelse(CKD == "CKD", 1, 0)
+  )
+```
+
