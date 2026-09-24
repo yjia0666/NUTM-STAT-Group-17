@@ -18,18 +18,27 @@ df <- df1 %>%
     by = c("ABSLID", "ABSPID")
   )
 
-#Aboriginal/Torres Strait Islanders Survey
+#Aboriginal/Torres Strait Islanders Survey. Their ABSHID and ABSGID will be combined
 
 df_2 <- df3 %>%
   select(ABSHID, ABSGID, SEX, SMKSTAT) %>%
   left_join(
     df4 %>% select(ABSHID, ABSGID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB),
     by = c("ABSHID", "ABSGID")
-  ) %>%
-  mutate(col1 = paste(col1, col2, sep = " "))
+  )
+
+merged_df <- left_join(df, df_2, by = c("ABSLID" = "ABSHID", "ABSPID"="ABSGID", "EGFRKDSA", "ACRNTR", "ACRIPA", "EGFRIMP", "EGFRRESB")) %>%
+  mutate(SEX = coalesce(SEX.x, SEX.y)) %>%
+  select(-SEX.x, -SEX.y) %>%
+  mutate(SMKSTAT = coalesce(SMKSTAT.x, SMKSTAT.y)) %>%
+  select(-SMKSTAT.x, -SMKSTAT.y)
 
 
-merged_df <- left_join(df_1, df_2, by = c("ID_dataset1" = "ID_dataset2"))
+```
+
+```r
+
+#Currently only alcohol type from the non-Indigenous cohort.
 
 alcohol_type <- read.csv(here("data", "AHSnhs11b14.csv"), stringsAsFactors = TRUE) %>%
   select(
@@ -108,9 +117,10 @@ clean_data <- na.omit(df_final)
 
 ```
 
+
 ```{r}
 # Duplicate id
-df1 %>%
+merged_df %>%
   count(ABSLID, ABSPID) %>%
   filter(n > 1)
 ```
@@ -118,13 +128,13 @@ df1 %>%
 
 
 ```{r}
-df %>%
+merged_df %>%
   count(EGFRKDSA, SEX)
 ```
 
 
 ```{r}
-ckd_data <- df %>%
+ckd_data <- merged_df %>%
   mutate(
     SEX = case_when(
       SEX == 1 ~ "Male",
@@ -144,6 +154,34 @@ ckd_data <- df %>%
       EGFRIMP == 1 ~ "Normal",
       EGFRIMP == 2 ~ "Impaired",
       EGFRIMP %in% c(0, 8) ~ NA_character_
+    ),
+    
+    smoker_status = case_when(
+      SMKSTAT == 5 ~ "Never smoked",
+      SMKSTAT == 4 ~ "Ex-smoker",
+      SMKSTAT %in% c(1, 2, 3) ~ "Current smoker",
+      SMKSTAT == 0 ~ NA_character_
     )
   )
+```
+
+```{r}
+# Calculate the proportion within each sex
+ckd_prop <- ckd_data %>%
+  filter(!is.na(SEX), !is.na(CKD)) %>%
+  group_by(SEX, CKD) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(SEX) %>%
+  mutate(proportion = n / sum(n))
+
+ggplot(ckd_prop, aes(x = factor(CKD),
+                    y = proportion,
+                    fill = factor(SEX))) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    y = "Proportion",
+    fill = "Sex"
+  ) +
+  theme_minimal()
 ```
