@@ -470,5 +470,7 @@ df_filter <- df_final %>%
   mutate(
     CKD = ifelse(CKD == "CKD", 1, 0)
   )
+
+saveRDS(df_filter, "shared_df_filter.rds")
 ```
 
