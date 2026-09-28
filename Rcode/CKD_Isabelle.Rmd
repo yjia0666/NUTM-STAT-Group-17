@@ -11,13 +11,15 @@ library(tidyverse)
 library(here)
 ```
 
+#Contains Project Proposal Visualisations
+
 
 ```{r}
 df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
                 
 df <- df1 %>%
-  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B) %>%
+  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B, ALCF3) %>%
   left_join(
     df2 %>% select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB),
     by = c("ABSLID", "ABSPID")
