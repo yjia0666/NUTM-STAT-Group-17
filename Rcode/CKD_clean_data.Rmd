@@ -17,12 +17,8 @@ df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
 
 df <- df1 %>%
-<<<<<<< HEAD
-  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B, SMKAGEDB, ALCF3) %>%
-=======
+  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B, SMKAGEDB, ALCSTR01, AL2K7DAY, ALCF3, AGEB) %>%
   filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
-  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B, SMKAGEDB, ALCSTR01, AL2K7DAY) %>%
->>>>>>> 3de78479b7f9d108ee8c5862b038a7ce581710b7
   left_join(
     df2 %>%
     filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
@@ -49,6 +45,23 @@ df %>%
 
 ckd_data <- df %>%
   mutate(
+    AGE = case_when(
+      AGEB == 5 ~ "18 - 19 years",
+      AGEB == 6 ~ "20 - 24 years", 
+      AGEB == 7 ~ "25 - 29 years", 
+      AGEB == 8 ~ "30 - 34 years", 
+      AGEB == 9 ~ "35 - 39 years", 
+      AGEB == 10 ~ "40 - 44 years", 
+      AGEB == 11 ~ "45 - 49 years", 
+      AGEB == 12 ~ "50 - 54 years", 
+      AGEB == 13 ~ "55 - 59 years", 
+      AGEB == 14 ~ "60 - 64 years", 
+      AGEB == 15 ~ " 65 - 69 years", 
+      AGEB == 16 ~ "70 - 74 years", 
+      AGEB == 17 ~ "75 - 79 years", 
+      AGEB == 18 ~ "80 - 84 years", 
+      AGEB == 19 ~ "85 years and over", 
+    ),
     SEX = case_when(
       SEX == 1 ~ "Male",
       SEX == 2 ~ "Female",
@@ -106,8 +119,7 @@ ckd_data <- df %>%
     FERRCRPB %in% 9:11 ~ "≥300 µg/L",
     FERRCRPB %in% c(97, 98) ~ NA_character_
   ),
-<<<<<<< HEAD
-  
+
   Vitamin_D = case_when(
   VDLCMRGT == 1 ~ "Adequate (≥50 nmol/L)",
   VDLCMRGT == 2 ~ "Mild deficiency (30–49 nmol/L)",
@@ -128,14 +140,15 @@ ckd_data <- df %>%
   ALCF3 == 97 ~ "NA_character_",
   ALCF3 == 99 ~ "NA_character_",
   ALCF3 %in% c(8, 9, 10) ~ "Less often than 1 day a week"
-  
-=======
+  ),
+
     Vitamin_D = case_when(
     VDLCMRGT == 1 ~ "Adequate (≥50 nmol/L)",
     VDLCMRGT == 2 ~ "Mild deficiency (30–49 nmol/L)",
     VDLCMRGT == 3 ~ "Moderate/severe deficiency (<30 nmol/L)",
     VDLCMRGT %in% c(0, 8) ~ NA_character_
   ),
+  
     Alcohol_risk = case_when(
     ALCSTR01 %in% c(1, 2) ~ "High risk",
     ALCSTR01 %in% c(3, 4) ~ "Risky",
@@ -153,10 +166,9 @@ ckd_data <- df %>%
     AL2K7DAY == 6 ~ "Never alcohol",
     AL2K7DAY %in% c(0, 8, 9) ~ NA_character_
   )
->>>>>>> 3de78479b7f9d108ee8c5862b038a7ce581710b7
   )
   
-  ) 
+
 
 ```
 
@@ -173,22 +185,6 @@ ckd_prop <- ckd_data %>%
   mutate(proportion = n / sum(n))
 ```
 
-
-```{r}
-ggplot(ckd_prop, aes(x = factor(CKD),
-                    y = proportion,
-                    fill = factor(SEX))) +
-  geom_col(position = "dodge") +
-  scale_y_continuous(labels = scales::percent) +
-  labs(
-    y = "Proportion",
-    fill = "Sex"
-  ) +
-  theme_minimal()
-
-
-
-```
 
 Alcohol Section of Dataset.
 
@@ -247,8 +243,6 @@ alcohol_type <- alcohol_type %>%
       ALCTYPT == 13 ~ "Cocktails",
       ALCTYPT == 14 ~ "Other",
       ALCTYPT == 0 ~ NA_character_
-      
-      ALCSDCDT
     )
   )
 ```
@@ -325,8 +319,215 @@ alcohol <- c("Low_alcohol_beer", "Mid_strength_beer", "Full_strength_beer", "Low
 
 ```
 
+
 ```{r}
 
+alc_quantity_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(alcohol_quantity)
+  ) %>%
+  mutate(
+    alcohol_group = cut(
+      alcohol_quantity,
+      breaks = c(-Inf, 0, 1, 2, 4, Inf),
+      labels = c("0", "0–1", "1–2", "2–4", ">4")
+    )
+  ) %>%
+  group_by(SEX, alcohol_group) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+
+```
+
+```{r}
+alc_quantity_prop
+```
+
+The smoking and micronutrient data. To avoid information loss, we did not shrink data for alcohol and CKD if smoking and micronutrients was missing. 
+
+```{r}
+smoker_status_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(smoker_status),
+    !is.na(daily_smoke),
+  ) %>%
+  group_by(SEX, daily_smoke) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+```
+
+
+```{r}
+smoker_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(smoker_status),
+  ) %>%
+  group_by(SEX, smoker_status) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+```
+
+
+
+```{r}
+
+micro_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD)
+  ) %>%
+  select(SEX, CKD, Folate, Vitamin_B12, Ferritin, Vitamin_D) %>%
+  pivot_longer(
+    cols = c(Folate, Vitamin_B12, Ferritin, Vitamin_D),
+    names_to = "micronutrient",
+    values_to = "category"
+  ) %>%
+  filter(!is.na(category)) %>%
+  group_by(micronutrient, SEX, category) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+
+```
+
+```{r}
+
+#Not including Smoking/Micronutrient Data
+
+df_filter <- df_final %>%
+  select(
+    SEX,
+    CKD,
+    alcohol_quantity,
+    Low_alcohol_beer,
+    Mid_strength_beer,
+    Full_strength_beer,
+    White_wine,
+    Red_wine,
+    Low_alcohol_wine,
+    Champagne_sparkling_wine,
+    Spirits_RTD,
+    Liqueurs,
+    Spirits,
+    Fortified_wine,
+    Cider,
+    Cocktails,
+    ALC_freq_3,
+    Alcohol_risk,
+    Alcohol_risk_7day,
+    AGE
+    
+  ) %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(alcohol_quantity),
+    !is.na(Red_wine),
+    !is.na(ALC_freq_3),
+    !is.na(Alcohol_risk),
+    !is.na(Alcohol_risk_7day),
+    !is.na(AGE)
+    
+  ) %>%
+  mutate(
+    CKD = ifelse(CKD == "CKD", 1, 0)
+  ) %>%
+  mutate(
+    SEX_factor = ifelse(SEX == "Female", 1, 0) #0 is male, 1 is female
+  ) 
+
+df_filter$CKD_factor <- factor(df_filter$CKD, 
+                              levels = c(0, 1))
+
+df_filter$SEX_factor <- factor(df_filter$SEX_factor, 
+                              levels = c(0, 1))
+
+df_filter$ALC_freq_3_factor <- factor(df_filter$ALC_freq_3)
+
+df_filter %>% 
+  mutate(
+    CKD = ifelse(CKD == "CKD", 1, 0),
+    SEX_factor = factor(
+      SEX,
+      levels = c("Female", "Male")
+    ),
+    AGE = factor(
+      AGE,
+      levels = c("18 - 19 years",
+      "20 - 24 years", 
+      "25 - 29 years", 
+      "30 - 34 years", 
+      "35 - 39 years", 
+      "40 - 44 years", 
+       "45 - 49 years", 
+       "50 - 54 years", 
+       "55 - 59 years", 
+       "60 - 64 years", 
+        " 65 - 69 years", 
+        "70 - 74 years", 
+       "75 - 79 years", 
+      "80 - 84 years", 
+      "85 years and over"
+      )
+    ),
+          
+     Alcohol_risk = factor(
+      Alcohol_risk,
+      levels = c(
+        "Low risk",
+        "Risky",
+        "High risk",
+        "No alcohol (past year)",
+        "Never alcohol"
+      )
+    ),
+    Alcohol_risk_7day = factor(
+      Alcohol_risk_7day,
+      levels = c(
+        "Low risk",
+        "Medium risk",
+        "High risk",
+        "No alcohol (1 week–<12 months)",
+        "No alcohol (≥12 months)",
+        "Never alcohol"
+      )
+    )
+  )
+
+saveRDS(df_filter, "shared_df_filter.rds")
+
+#We need to do the smoking / micronutrient secondary study in a separate data frame (It removes more people)
+```
+
+
+```{r}
+ggplot(ckd_prop, aes(x = factor(CKD),
+                    y = proportion,
+                    fill = factor(SEX))) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    y = "Proportion",
+    fill = "Sex"
+  ) +
+  theme_minimal()
 
 ggplot(
   alcohol_type_prop %>% filter(CKD == "CKD"),
@@ -375,35 +576,25 @@ ggplot(plot_data, aes(x = factor(ALC_freq_3),
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 
-
-```
-
-```{r}
-
-alc_quantity_prop <- df_final %>%
-  filter(
-    !is.na(SEX),
-    !is.na(CKD),
-    !is.na(alcohol_quantity)
-  ) %>%
-  mutate(
-    alcohol_group = cut(
-      alcohol_quantity,
-      breaks = c(-Inf, 0, 1, 2, 4, Inf),
-      labels = c("0", "0–1", "1–2", "2–4", ">4")
-    )
-  ) %>%
-  group_by(SEX, alcohol_group) %>%
-  summarise(
-    proportion_CKD = mean(CKD == "CKD"),
-    n = n(),
-    .groups = "drop"
+ggplot(
+  smoker_prop,
+  aes(
+    x = smoker_status,
+    y = proportion_CKD,
+    fill = SEX
   )
+) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Smoking status",
+    y = "Proportion with CKD",
+    fill = "Sex"
+  ) +
+  theme_minimal()
+ggsave(here("figures", "new_smoking_CKD.png"))
 
-```
-
-
-```{r}
+#Graphs
 #Quantity prop of the Alcohol group via intake
 
 ggplot(
@@ -421,33 +612,8 @@ ggplot(
     y = "Proportion with CKD",
     fill = "Sex"
   ) +
-  theme_minimal()
+  theme_minimal() 
 
-```
-
-```{r}
-alc_quantity_prop
-```
-
-The smoking and micronutrient data. To avoid information loss, we did not shrink data for alcohol and CKD if smoking and micronutrients was missing. 
-
-```{r}
-smoker_status_prop <- df_final %>%
-  filter(
-    !is.na(SEX),
-    !is.na(CKD),
-    !is.na(smoker_status),
-    !is.na(daily_smoke),
-  ) %>%
-  group_by(SEX, daily_smoke) %>%
-  summarise(
-    proportion_CKD = mean(CKD == "CKD"),
-    n = n(),
-    .groups = "drop"
-  )
-```
-
-```{r}
 ggplot(
   smoker_status_prop,
   aes(
@@ -466,69 +632,8 @@ ggplot(
   ) +
   theme_minimal()
 ggsave(here("figures", "new_smoking_daily_CKD.png"))
-```
 
-
-```{r}
-smoker_prop <- df_final %>%
-  filter(
-    !is.na(SEX),
-    !is.na(CKD),
-    !is.na(smoker_status),
-  ) %>%
-  group_by(SEX, smoker_status) %>%
-  summarise(
-    proportion_CKD = mean(CKD == "CKD"),
-    n = n(),
-    .groups = "drop"
-  )
-```
-
-
-```{r}
-ggplot(
-  smoker_prop,
-  aes(
-    x = smoker_status,
-    y = proportion_CKD,
-    fill = SEX
-  )
-) +
-  geom_col(position = "dodge") +
-  scale_y_continuous(labels = scales::percent) +
-  labs(
-    x = "Smoking status",
-    y = "Proportion with CKD",
-    fill = "Sex"
-  ) +
-  theme_minimal()
-ggsave(here("figures", "new_smoking_CKD.png"))
-```
-
-
-```{r}
-
-micro_prop <- df_final %>%
-  filter(
-    !is.na(SEX),
-    !is.na(CKD)
-  ) %>%
-  select(SEX, CKD, Folate, Vitamin_B12, Ferritin, Vitamin_D) %>%
-  pivot_longer(
-    cols = c(Folate, Vitamin_B12, Ferritin, Vitamin_D),
-    names_to = "micronutrient",
-    values_to = "category"
-  ) %>%
-  filter(!is.na(category)) %>%
-  group_by(micronutrient, SEX, category) %>%
-  summarise(
-    proportion_CKD = mean(CKD == "CKD"),
-    n = n(),
-    .groups = "drop"
-  )
-```
-
-```{r}
+#micronutrient graph
 ggplot(
   micro_prop,
   aes(
@@ -551,99 +656,4 @@ ggplot(
   )
 ggsave(here("figures", "new_micronutrient_CKD.png"))
 ```
-
-```{r}
-
-#Not including Smoking/Micronutrient Data
-
-
-
-df_filter <- df_final %>%
-  select(
-    SEX,
-    CKD,
-    alcohol_quantity,
-    Low_alcohol_beer,
-    Mid_strength_beer,
-    Full_strength_beer,
-    White_wine,
-    Red_wine,
-    Low_alcohol_wine,
-    Champagne_sparkling_wine,
-    Spirits_RTD,
-    Liqueurs,
-    Spirits,
-    Fortified_wine,
-    Cider,
-    Cocktails,
-    ALC_freq_3
-    
-  ) %>%
-  filter(
-    !is.na(SEX),
-    !is.na(CKD),
-    !is.na(alcohol_quantity),
-    !is.na(Red_wine),
-<<<<<<< HEAD
-    !is.na(ALC_freq_3)
-    
-  ) %>%
-  mutate(
-    CKD = ifelse(CKD == "CKD", 1, 0)
-  ) %>%
-  mutate(
-    SEX_factor = ifelse(SEX == "Female", 1, 0) #0 is male, 1 is female
-  ) 
-
-df_filter$CKD_factor <- factor(df_filter$CKD, 
-                              levels = c(0, 1))
-
-df_filter$SEX_factor <- factor(df_filter$SEX_factor, 
-                              levels = c(0, 1))
-
-df_filter$ALC_freq_3_factor <- factor(df_filter$ALC_freq_3)
-=======
-    !is.na(Alcohol_risk),
-    !is.na(Alcohol_risk_7day)
-  ) %>%
-  mutate(
-    CKD = ifelse(CKD == "CKD", 1, 0),
-    SEX_factor = factor(
-      SEX,
-      levels = c("Female", "Male")
-    ),
-     Alcohol_risk = factor(
-      Alcohol_risk,
-      levels = c(
-        "Low risk",
-        "Risky",
-        "High risk",
-        "No alcohol (past year)",
-        "Never alcohol"
-      )
-    ),
-    Alcohol_risk_7day = factor(
-      Alcohol_risk_7day,
-      levels = c(
-        "Low risk",
-        "Medium risk",
-        "High risk",
-        "No alcohol (1 week–<12 months)",
-        "No alcohol (≥12 months)",
-        "Never alcohol"
-      )
-    )
-  )
->>>>>>> 3de78479b7f9d108ee8c5862b038a7ce581710b7
-
-saveRDS(df_filter, "shared_df_filter.rds")
-
-
-
-
-
-
-#We need to do the smoking / micronutrient secondary study in a separate data frame (It removes more people)
-```
-
 
