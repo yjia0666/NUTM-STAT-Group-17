@@ -18,11 +18,11 @@ df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
                 
 df <- df1 %>%
   filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
-  select(ABSLID, ABSPID, SEX, SMKSTAT, SMKAGEDB) %>%
+  select(ABSLID, ABSPID, SEX, ALCSTR01, AL2K7DAY) %>%
   left_join(
     df2 %>%
     filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
-    select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB, VDLCMRGT, FOLATREB, B12RESB, FERRCRPB),
+    select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB),
     by = c("ABSLID", "ABSPID")
   )
 ```
@@ -76,49 +76,23 @@ ckd_data <- df %>%
       EGFRIMP == 2 ~ "Impaired",
       EGFRIMP %in% c(0, 8) ~ NA_character_
     ),
-    smoker_status = case_when(
-      SMKSTAT == 5 ~ "Never smoked",
-      SMKSTAT == 4 ~ "Ex-smoker",
-      SMKSTAT %in% c(1, 2, 3) ~ "Current smoker",
-      SMKSTAT == 0 ~ NA_character_
-    ),
-    daily_smoke = case_when(
-      SMKAGEDB == 1 ~ "Smoked daily for less than 10 years",
-      SMKAGEDB %in% 2:3 ~ "Smoked daily for 10 - 29 years",
-      SMKAGEDB %in% 4:6 ~ "Smoked daily for 30 years and over",
-      SMKAGEDB == 7 ~ NA_character_,
-      SMKAGEDB == 8 ~ "Never smoked daily"
-    ),    
-    Folate = case_when(
-      FOLATREB %in% 1:3 ~ "<15 nmol/L",
-      FOLATREB %in% 4:5 ~ "15–<25 nmol/L",
-      FOLATREB %in% 6:7 ~ "25–<35 nmol/L",
-      FOLATREB %in% 8:9 ~ "35–<45 nmol/L",
-      FOLATREB == 10 ~ "≥45 nmol/L",
-      FOLATREB %in% c(97, 98) ~ NA_character_
-    ),
-    Vitamin_B12 = case_when(
-    B12RESB %in% 1:3 ~ "<220 pmol/L",
-    B12RESB == 4 ~ "220–<300 pmol/L",
-    B12RESB == 5 ~ "300–<400 pmol/L",
-    B12RESB %in% 6:7 ~ "400–<600 pmol/L",
-    B12RESB %in% 8:9 ~ "≥600 pmol/L",
-    B12RESB %in% c(97, 98) ~ NA_character_
+    Alcohol_risk = case_when(
+    ALCSTR01 %in% c(1, 2) ~ "High risk",
+    ALCSTR01 %in% c(3, 4) ~ "Risky",
+    ALCSTR01 %in% c(5, 6) ~ "Low risk",
+    ALCSTR01 == 8 ~ "No alcohol (past year)",
+    ALCSTR01 == 9 ~ "Never alcohol",
+    ALCSTR01 %in% c(0, 7) ~ NA_character_
   ),
-  Ferritin = case_when(
-    FERRCRPB %in% 1:4 ~ "<30 µg/L",
-    FERRCRPB == 5 ~ "30–<50 µg/L",
-    FERRCRPB == 6 ~ "50–<150 µg/L",
-    FERRCRPB %in% 7:8 ~ "150–<300 µg/L",
-    FERRCRPB %in% 9:11 ~ "≥300 µg/L",
-    FERRCRPB %in% c(97, 98) ~ NA_character_
-  ),
-  Vitamin_D = case_when(
-  VDLCMRGT == 1 ~ "Adequate (≥50 nmol/L)",
-  VDLCMRGT == 2 ~ "Mild deficiency (30–49 nmol/L)",
-  VDLCMRGT == 3 ~ "Moderate/severe deficiency (<30 nmol/L)",
-  VDLCMRGT %in% c(0, 8) ~ NA_character_
-)
+    Alcohol_risk_7day = case_when(
+    AL2K7DAY == 1 ~ "Low risk",
+    AL2K7DAY == 2 ~ "Medium risk",
+    AL2K7DAY == 3 ~ "High risk",
+    AL2K7DAY == 4 ~ "No alcohol (1 week–<12 months)",
+    AL2K7DAY == 5 ~ "No alcohol (≥12 months)",
+    AL2K7DAY == 6 ~ "Never alcohol",
+    AL2K7DAY %in% c(0, 8, 9) ~ NA_character_
+  )
   )
 ```
 
@@ -195,7 +169,7 @@ alcohol_type <- alcohol_type %>%
       ALCTYPT == 5 ~ "Red_wine",
       ALCTYPT == 6 ~ "Low_alcohol_wine",
       ALCTYPT == 7 ~ "Champagne_sparkling_wine",
-      ALCTYPT == 8 ~ "RTD_spirits_liqueur",
+      ALCTYPT == 8 ~ "Spirits_RTD",
       ALCTYPT == 9 ~ "Liqueurs",
       ALCTYPT == 10 ~ "Spirits",
       ALCTYPT == 11 ~ "Fortified_wine",
@@ -291,7 +265,7 @@ alcohol_type_prop <- df_final %>%
       Red_wine,
       Low_alcohol_wine,
       Champagne_sparkling_wine,
-      RTD_spirits_liqueur,
+      Spirits_RTD,
       Liqueurs,
       Spirits,
       Fortified_wine,
@@ -503,4 +477,228 @@ ggplot(
   )
 ggsave(here("figures", "micronutrient_CKD.png"))
 ```
+
+```{r}
+# Alcohol risk
+risk_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(Alcohol_risk)
+  ) %>%
+  group_by(SEX, Alcohol_risk) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+
+ggplot(
+  risk_prop,
+  aes(
+    x = Alcohol_risk,
+    y = proportion_CKD,
+    fill = SEX
+  )
+) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Alcohol risk category",
+    y = "Proportion with CKD",
+    fill = "Sex"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Alcohol risk level 7 day average(2001)
+risk_7day_prop <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(Alcohol_risk_7day)
+  ) %>%
+  group_by(SEX, Alcohol_risk_7day) %>%
+  summarise(
+    proportion_CKD = mean(CKD == "CKD"),
+    n = n(),
+    .groups = "drop"
+  )
+
+ggplot(
+  risk_7day_prop,
+  aes(
+    x = Alcohol_risk_7day,
+    y = proportion_CKD,
+    fill = SEX
+  )
+) +
+  geom_col(
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  labs(
+    x = "7-day average alcohol risk",
+    y = "Proportion with CKD",
+    fill = "Sex"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 30,
+      hjust = 1
+    ),
+    legend.position = "top"
+  )
+
+```
+
+Regression using risk levels
+```{r}
+ckd_filter <- df_final %>%
+  filter(
+    !is.na(SEX),
+    !is.na(CKD),
+    !is.na(alcohol_quantity),
+    !is.na(Red_wine)
+  ) %>%
+  mutate(
+    CKD = ifelse(CKD == "CKD", 1, 0),
+    SEX_factor = factor(
+      SEX,
+      levels = c("Female", "Male")
+    ),
+    Alcohol_risk = factor(
+      Alcohol_risk,
+      levels = c(
+        "Low risk",
+        "Risky",
+        "High risk"
+      )
+    )
+  )
+```
+
+```{r}
+ckd_filter$Beer <- as.integer(
+  rowSums(ckd_filter[, c(
+    "Low_alcohol_beer",
+    "Mid_strength_beer",
+    "Full_strength_beer"
+  )], na.rm = TRUE) > 0
+)
+
+ckd_filter$Wine <- as.integer(
+  rowSums(ckd_filter[, c(
+    "White_wine",
+    "Red_wine",
+    "Low_alcohol_wine",
+    "Champagne_sparkling_wine",
+    "Fortified_wine"
+  )], na.rm = TRUE) > 0
+)
+
+ckd_filter$Spirits_Liqueurs <- as.integer(
+  rowSums(ckd_filter[, c(
+    "Spirits_RTD",
+    "Liqueurs",
+    "Spirits"
+  )], na.rm = TRUE) > 0
+)
+
+ckd_filter$Other <- as.integer(
+  rowSums(ckd_filter[, c(
+    "Cider",
+    "Cocktails"
+  )], na.rm = TRUE) > 0
+)
+```
+
+```{r}
+levels(ckd_filter$Alcohol_risk)
+```
+
+
+```{r}
+model_interaction <- glm(CKD ~ alcohol_quantity * SEX_factor + Alcohol_risk * SEX_factor + Beer + Wine + Spirits_Liqueurs + Other, data = ckd_filter, family = binomial)
+summary(model_interaction)
+```
+```{r}
+library(emmeans)
+```
+
+
+```{r}
+emm <- emmeans(
+  model_interaction,
+  ~ Alcohol_risk | SEX_factor
+)
+
+pairs(
+  emm,
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+```
+
+Compare the odds of CKD between different alcohol-risk groups within each sex.  
+Among females, Low risk differed significantly from High risk, no significant differences were observed for the other comparisons.  
+Among males, Low risk was associated with higher CKD odds than Risky and High risk.  
+p: Assuming 2 groups have no differences, the probability of observing this result
+
+OR>1, odds of the previous group is higher -> higher probability of no CKD
+
+```{r}
+model_risk_no_int <- glm(
+  CKD ~ Alcohol_risk + SEX_factor +
+        alcohol_quantity +
+        Beer + Wine + Spirits_Liqueurs + Other,
+  data = ckd_filter,
+  family = binomial
+)
+
+model_risk_int <- glm(
+  CKD ~ Alcohol_risk * SEX_factor +
+        alcohol_quantity +
+        Beer + Wine + Spirits_Liqueurs + Other,
+  data = ckd_filter,
+  family = binomial
+)
+
+anova(
+  model_risk_no_int,
+  model_risk_int,
+  test = "Chisq"
+)
+```
+```{r}
+model_quantity_no_int <- glm(
+  CKD ~ Alcohol_risk + SEX_factor +
+        alcohol_quantity +
+        Beer + Wine + Spirits_Liqueurs + Other,
+  data = ckd_filter,
+  family = binomial
+)
+
+model_quantity_int <- glm(
+  CKD ~ Alcohol_risk +
+        alcohol_quantity * SEX_factor +
+        Beer + Wine + Spirits_Liqueurs + Other,
+  data = ckd_filter,
+  family = binomial
+)
+
+anova(
+  model_quantity_no_int,
+  model_quantity_int,
+  test = "Chisq"
+)
+```
+
+
 

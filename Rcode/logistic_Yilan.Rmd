@@ -1,0 +1,131 @@
+---
+title: "logistic_Yilan"
+output: html_document
+date: "2026-09-24"
+---
+
+```{r}
+library(dplyr)
+```
+
+```{r}
+ckd_filter <- readRDS("shared_df_filter.rds")
+```
+
+
+```{r}
+class(ckd_filter$Alcohol_risk_7day)
+```
+```{r}
+table(ckd_filter$Other, useNA = "ifany") # 
+```
+"Other" was excluded because all observations had a value of 0 and therefore provided no variation for the analysis.
+
+```{r}
+# number of people by number of alcohol types consumed
+alcohol_types <- c(
+  "Low_alcohol_beer",
+  "Mid_strength_beer",
+  "Full_strength_beer",
+  "White_wine",
+  "Red_wine",
+  "Low_alcohol_wine",
+  "Champagne_sparkling_wine",
+  "Spirits_RTD",
+  "Liqueurs",
+  "Spirits",
+  "Fortified_wine",
+  "Cider",
+  "Cocktails"
+)
+
+ckd_filter <- ckd_filter %>%
+  mutate(
+    n_alcohol_types = rowSums(
+      across(all_of(alcohol_types))
+    )
+  )
+
+table(ckd_filter$n_alcohol_types)
+```
+
+```{r}
+# Using the original predictors, full model with interaction
+res <- glm(CKD ~ alcohol_quantity * SEX_factor + Low_alcohol_beer + Mid_strength_beer + Full_strength_beer + White_wine + Red_wine + Low_alcohol_wine + Champagne_sparkling_wine + Champagne_sparkling_wine + Spirits_RTD + Liqueurs + Fortified_wine + Cider + Cocktails, data = ckd_filter, family = binomial)
+summary(res)
+```
+
+
+```{r}
+# Combine
+ckd_filter$Beer <- as.integer(
+  rowSums(ckd_filter[, c(
+    "Low_alcohol_beer",
+    "Mid_strength_beer",
+    "Full_strength_beer"
+  )], na.rm = TRUE) > 0
+)
+
+ckd_filter$Wine <- as.integer(
+  rowSums(ckd_filter[, c(
+    "White_wine",
+    "Red_wine",
+    "Low_alcohol_wine",
+    "Champagne_sparkling_wine",
+    "Fortified_wine"
+  )], na.rm = TRUE) > 0
+)
+
+ckd_filter$Spirits_Liqueurs <- as.integer(
+  rowSums(ckd_filter[, c(
+    "Spirits_RTD",
+    "Liqueurs",
+    "Spirits"
+  )], na.rm = TRUE) > 0
+)
+
+ckd_filter$Other <- as.integer(
+  rowSums(ckd_filter[, c(
+    "Cider",
+    "Cocktails"
+  )], na.rm = TRUE) > 0
+)
+
+```
+
+Note: Other is not a variable from the original dataset. It represents cider or cocktail consumption.
+
+```{r}
+# Using combined predictors
+model_interaction <- glm(CKD ~ alcohol_quantity * SEX_factor + Beer + Wine + Spirits_Liqueurs + Other, data = ckd_filter, family = binomial)
+summary(model_interaction)
+```
+
+Association: using logistic regression doesn't need to handle class imbalance?
+
+interaction p: >0.05 but very close?
+
+```{r}
+model_no_interaction <- glm(CKD ~ alcohol_quantity + SEX_factor + Beer + Wine + Spirits_Liqueurs + Other, data = ckd_filter, family = binomial)
+summary(model_no_interaction)
+```
+
+```{r}
+anova(model_no_interaction,model_interaction, test="Chisq")
+```
+
+```{r}
+AIC(model_no_interaction,model_interaction)
+```
+
+The likelihood-ratio test indicated that adding the interaction term significantly improved model fit, while the interaction model also had a slightly lower AIC
+
+```{r}
+anova(model_interaction)
+```
+
+
+## Model Selection
+stepwise?
+
+## Model Performance
