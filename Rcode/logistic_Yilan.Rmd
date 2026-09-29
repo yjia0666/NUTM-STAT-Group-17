@@ -14,7 +14,7 @@ ckd_filter <- readRDS("shared_df_filter.rds")
 
 
 ```{r}
-class(ckd_filter$SEX_factor)
+class(ckd_filter$Alcohol_risk_7day)
 ```
 ```{r}
 table(ckd_filter$Other, useNA = "ifany") # 
