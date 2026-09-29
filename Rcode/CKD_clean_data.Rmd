@@ -461,7 +461,7 @@ df_filter$SEX_factor <- factor(df_filter$SEX_factor,
 
 df_filter$ALC_freq_3_factor <- factor(df_filter$ALC_freq_3)
 
-df_filter %>% 
+df_filter <- df_filter %>% 
   mutate(
     CKD = ifelse(CKD == "CKD", 1, 0),
     SEX_factor = factor(
@@ -469,22 +469,23 @@ df_filter %>%
       levels = c("Female", "Male")
     ),
     AGE = factor(
-      AGE,
-      levels = c("18 - 19 years",
-      "20 - 24 years", 
-      "25 - 29 years", 
-      "30 - 34 years", 
-      "35 - 39 years", 
-      "40 - 44 years", 
-       "45 - 49 years", 
-       "50 - 54 years", 
-       "55 - 59 years", 
-       "60 - 64 years", 
-        " 65 - 69 years", 
-        "70 - 74 years", 
-       "75 - 79 years", 
-      "80 - 84 years", 
-      "85 years and over"
+     AGE,
+      levels = c(
+        "18 - 19 years",
+        "20 - 24 years",
+        "25 - 29 years",
+        "30 - 34 years",
+        "35 - 39 years",
+        "40 - 44 years",
+        "45 - 49 years",
+        "50 - 54 years",
+        "55 - 59 years",
+        "60 - 64 years",
+        "65 - 69 years",
+        "70 - 74 years",
+        "75 - 79 years",
+        "80 - 84 years",
+        "85 years and over"
       )
     ),
           
