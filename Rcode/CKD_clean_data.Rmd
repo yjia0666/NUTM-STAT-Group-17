@@ -56,7 +56,7 @@ ckd_data <- df %>%
       AGEB == 12 ~ "50 - 54 years", 
       AGEB == 13 ~ "55 - 59 years", 
       AGEB == 14 ~ "60 - 64 years", 
-      AGEB == 15 ~ " 65 - 69 years", 
+      AGEB == 15 ~ "65 - 69 years", 
       AGEB == 16 ~ "70 - 74 years", 
       AGEB == 17 ~ "75 - 79 years", 
       AGEB == 18 ~ "80 - 84 years", 
@@ -136,9 +136,9 @@ ckd_data <- df %>%
   ALCF3 == 5 ~ "3 days a week",
   ALCF3 == 6 ~ "2 days a week",
   ALCF3 == 7 ~ "1 day a week",
-  ALCF3 == 98 ~ "NA_character_",
-  ALCF3 == 97 ~ "NA_character_",
-  ALCF3 == 99 ~ "NA_character_",
+  ALCF3 == 98 ~ NA_character_,
+  ALCF3 == 97 ~ NA_character_,
+  ALCF3 == 99 ~ NA_character_,
   ALCF3 %in% c(8, 9, 10) ~ "Less often than 1 day a week"
   ),
 
@@ -167,9 +167,6 @@ ckd_data <- df %>%
     AL2K7DAY %in% c(0, 8, 9) ~ NA_character_
   )
   )
-  
-
-
 ```
 
 
@@ -198,7 +195,6 @@ alcohol_type <- read.csv(here("data", "AHSnhs11b14.csv"), stringsAsFactors = TRU
     ALCTYPT,
     TOTPALCR,
     ALCSDCDT,
-    
   )
 ```
 
@@ -214,7 +210,6 @@ alcohol_quantity <- df1 %>%
       ALINWKSD == 97 ~ 0,          # Did not drink last week
       ALINWKSD >= 0 & ALINWKSD <= 96 ~ ALINWKSD,  # Actual alcohol intake in last week 
       ALINWKSD %in% c(98, 99) ~ NA_real_  # Not stated/unknown or not applicable,
-   
     )
   )
 ```
@@ -277,6 +272,7 @@ df_final <- ckd_data %>%
     by = c("ABSLID", "ABSPID")
   )
 ```
+
 ```{r}
 alcohol_type %>%
   count(alcohol_type)
@@ -315,13 +311,10 @@ alcohol_type_prop <- df_final %>%
   mutate(proportion = n / sum(n))
 
 alcohol <- c("Low_alcohol_beer", "Mid_strength_beer", "Full_strength_beer", "Low_alcohol_wine", "White_wine", "Red_wine", "Fortified_wine",  "Champagne_sparkling_wine", "Spirits_RTD", "Liqueurs","Spirits",  "Cider", "Cocktails")
-
-
 ```
 
 
 ```{r}
-
 alc_quantity_prop <- df_final %>%
   filter(
     !is.na(SEX),
@@ -341,7 +334,6 @@ alc_quantity_prop <- df_final %>%
     n = n(),
     .groups = "drop"
   )
-
 ```
 
 ```{r}
@@ -451,6 +443,7 @@ df_filter <- df_final %>%
 ```{r}
 # Convert variables to factors
 df_filter <- df_filter %>% 
+  filter(AGE != "<18 years") %>%
   mutate(
     CKD = factor(
       ifelse(CKD == "CKD", 1, 0),
