@@ -578,11 +578,29 @@ ckd_filter <- df_final %>%
       levels = c(
         "Low risk",
         "Risky",
-        "High risk"
+        "High risk",
+        "No alcohol (past year)",
+        "Never alcohol"
+      )
+    ),
+    Alcohol_risk_7day = factor(
+      Alcohol_risk_7day,
+      levels = c(
+        "Low risk",
+        "Medium risk",
+        "High risk",
+        "No alcohol (1 week–<12 months)",
+        "No alcohol (≥12 months)",
+        "Never alcohol"
       )
     )
   )
 ```
+
+```{r}
+table(ckd_filter$Alcohol_risk_7day, useNA = "ifany") 
+```
+
 
 ```{r}
 ckd_filter$Beer <- as.integer(

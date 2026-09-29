@@ -6,20 +6,25 @@ date: "2026-09-24"
 
 ```{r}
 library(dplyr)
+library(emmeans)
+library(car)
+library(dagitty)
 ```
 
 ```{r}
 ckd_filter <- readRDS("shared_df_filter.rds")
 ```
 
+```{r}
+class(ckd_filter$Cider)
+```
 
 ```{r}
-class(ckd_filter$Alcohol_risk_7day)
-```
-```{r}
-table(ckd_filter$Other, useNA = "ifany") # 
+table(ckd_filter$AGE, useNA = "ifany") 
 ```
 "Other" was excluded because all observations had a value of 0 and therefore provided no variation for the analysis.
+
+The “No alcohol (past year)” and “Never alcohol” categories contained no participants (n = 0) and were excluded from the regression analysis.
 
 ```{r}
 # number of people by number of alcohol types consumed
@@ -49,15 +54,45 @@ ckd_filter <- ckd_filter %>%
 table(ckd_filter$n_alcohol_types)
 ```
 
+## Causal Analysis
+```{r}
+dag_alcohol_ckd <- dagitty("
+dag {
+AGE -> Alcohol
+AGE -> CKD
+
+SEX -> Alcohol
+SEX -> CKD
+
+Alcohol -> CKD
+}
+")
+
+adj_alcohol_ckd <- adjustmentSets(
+  dag_alcohol_ckd,
+  exposure = "Alcohol",
+  outcome = "CKD"
+)
+
+adj_alcohol_ckd
+```
+
+
+### Full model
 ```{r}
 # Using the original predictors, full model with interaction
-res <- glm(CKD ~ alcohol_quantity * SEX_factor + Low_alcohol_beer + Mid_strength_beer + Full_strength_beer + White_wine + Red_wine + Low_alcohol_wine + Champagne_sparkling_wine + Champagne_sparkling_wine + Spirits_RTD + Liqueurs + Fortified_wine + Cider + Cocktails, data = ckd_filter, family = binomial)
-summary(res)
+full_model <- glm(CKD ~ Alcohol_risk * SEX_factor + alcohol_quantity * SEX_factor + AGE + ALC_freq_3_factor + Low_alcohol_beer + Mid_strength_beer + Full_strength_beer + White_wine + Red_wine + Low_alcohol_wine + Champagne_sparkling_wine + Champagne_sparkling_wine + Spirits_RTD + Liqueurs + Fortified_wine + Cider + Cocktails, data = ckd_filter, family = binomial)
+summary(full_model)
+```
+
+```{r}
+vif(full_model)
 ```
 
 
 ```{r}
-# Combine
+# Do not run this
+# Combine(When alcohol types are numeric!)
 ckd_filter$Beer <- as.integer(
   rowSums(ckd_filter[, c(
     "Low_alcohol_beer",
@@ -93,39 +128,188 @@ ckd_filter$Other <- as.integer(
 
 ```
 
-Note: Other is not a variable from the original dataset. It represents cider or cocktail consumption.
+```{r}
+ckd_filter$Beer <- factor(
+  as.character(ckd_filter$Low_alcohol_beer) == "1" |
+  as.character(ckd_filter$Mid_strength_beer) == "1" |
+  as.character(ckd_filter$Full_strength_beer) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+ckd_filter$Wine <- factor(
+  as.character(ckd_filter$White_wine) == "1" |
+  as.character(ckd_filter$Red_wine) == "1" |
+  as.character(ckd_filter$Low_alcohol_wine) == "1" |
+  as.character(ckd_filter$Champagne_sparkling_wine) == "1" |
+  as.character(ckd_filter$Fortified_wine) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+ckd_filter$Spirits_Liqueurs <- factor(
+  as.character(ckd_filter$Spirits_RTD) == "1" |
+  as.character(ckd_filter$Liqueurs) == "1" |
+  as.character(ckd_filter$Spirits) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+ckd_filter$Other <- factor(
+  as.character(ckd_filter$Cider) == "1" |
+  as.character(ckd_filter$Cocktails) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+```
+
 
 ```{r}
-# Using combined predictors
-model_interaction <- glm(CKD ~ alcohol_quantity * SEX_factor + Beer + Wine + Spirits_Liqueurs + Other, data = ckd_filter, family = binomial)
-summary(model_interaction)
+table(ckd_filter$AGE, useNA = "ifany")
+table(ckd_filter$SEX_factor, useNA = "ifany")
+table(ckd_filter$Beer, useNA = "ifany")
+table(ckd_filter$Wine, useNA = "ifany")
+table(ckd_filter$Spirits_Liqueurs, useNA = "ifany")
+table(ckd_filter$Other, useNA = "ifany")
+```
+
+
+Note: Other is not a variable from the original dataset. It represents cider or cocktail consumption.
+
+### Only quantity
+```{r}
+# Using combined predictors, only quantity
+model_quantity_int <- glm(CKD ~ AGE + alcohol_quantity * SEX_factor + Beer + Wine + Spirits_Liqueurs + Cider + Cocktails, data = ckd_filter, family = binomial)
+summary(model_quantity_int)
 ```
 
 Association: using logistic regression doesn't need to handle class imbalance?
-
 interaction p: >0.05 but very close?
 
+
 ```{r}
-model_no_interaction <- glm(CKD ~ alcohol_quantity + SEX_factor + Beer + Wine + Spirits_Liqueurs + Other, data = ckd_filter, family = binomial)
-summary(model_no_interaction)
+model_quantity_no_int <- glm(CKD ~ alcohol_quantity + SEX_factor + Beer + Wine + Spirits_Liqueurs + Cider + Cocktails, data = ckd_filter, family = binomial)
+summary(model_quantity_no_int)
 ```
 
 ```{r}
-anova(model_no_interaction,model_interaction, test="Chisq")
+anova(model_quantity_int,model_quantity_no_int, test="Chisq")
 ```
 
 ```{r}
-AIC(model_no_interaction,model_interaction)
+AIC(model_int_no_risk,model_no_risk)
 ```
 
 The likelihood-ratio test indicated that adding the interaction term significantly improved model fit, while the interaction model also had a slightly lower AIC
 
 ```{r}
-anova(model_interaction)
+anova(model_int_no_risk)
+```
+
+### Only risk levels
+```{r}
+# Risk no quantity
+model_risk_no_int <- glm(
+  CKD ~ Alcohol_risk + SEX_factor +
+        Beer + Wine + Spirits_Liqueurs + Cider + Cocktails,
+  data = ckd_filter,
+  family = binomial
+)
+
+model_risk_int <- glm(
+  CKD ~ Alcohol_risk * SEX_factor +
+        Beer + Wine + Spirits_Liqueurs + Cider + Cocktails,
+  data = ckd_filter,
+  family = binomial
+)
+```
+
+```{r}
+summary(model_risk_int)
+```
+
+```{r}
+summary(model_risk_no_int)
+```
+
+```{r}
+anova(
+  model_risk_no_int,
+  model_risk_int,
+  test = "Chisq"
+)
 ```
 
 
+
+
+```{r}
+vif(model_no_int)
+```
+
+
+
+### Quantity + risk levels
+```{r}
+# Quantity + risk
+model_int <- glm(CKD ~ alcohol_quantity * SEX_factor + Alcohol_risk * SEX_factor + Beer + Wine + Spirits_Liqueurs + Other, data = ckd_filter, family = binomial)
+summary(model_int)
+```
+
+```{r}
+model_no_int <- glm(CKD ~ alcohol_quantity + Alcohol_risk + SEX_factor + Beer + Wine + Spirits_Liqueurs + Other, data = ckd_filter, family = binomial)
+summary(model_no_int)
+```
+
+```{r}
+vif(model_no_int)
+```
+No major multicollinearity!
+
+### Compare male and female
+```{r}
+# Male and female
+model_male <- glm(
+  CKD ~ alcohol_quantity + Alcohol_risk + Beer + Wine + Spirits_Liqueurs + Other,
+  data = subset(ckd_filter, SEX_factor == "Male"),
+  family = binomial
+)
+
+model_female <- glm(
+  CKD ~ alcohol_quantity + Alcohol_risk + Beer + Wine + Spirits_Liqueurs + Other,
+  data = subset(ckd_filter, SEX_factor == "Female"),
+  family = binomial
+)
+
+summary(model_female)
+summary(model_male)
+```
+
+```{r}
+emm <- emmeans(
+  model_int,
+  ~ Alcohol_risk | SEX_factor
+)
+
+pairs(
+  emm,
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+```
+
+Compare the odds of CKD between different alcohol-risk groups within each sex.  
+Among females, Low risk differed significantly from High risk, no significant differences were observed for the other comparisons.  
+Among males, Low risk was associated with higher CKD odds than Risky and High risk.  
+p: Assuming 2 groups have no differences, the probability of observing this result
+
+OR>1, odds of the previous group is higher -> higher probability of no CKD
+
 ## Model Selection
-stepwise?
+interaction or no interaction
+include risk?
+...We don't need to do model selection because we can only choose the model that's related to our RQ (with interaction, consider quantity or risk)?
 
 ## Model Performance
+
+
