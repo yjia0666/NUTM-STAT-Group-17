@@ -408,7 +408,6 @@ micro_prop <- df_final %>%
 ```
 
 ```{r}
-
 #Not including Smoking/Micronutrient Data
 
 df_filter <- df_final %>%
@@ -445,25 +444,18 @@ df_filter <- df_final %>%
     !is.na(Alcohol_risk_7day),
     !is.na(AGE)
     
-  ) %>%
-  mutate(
-    CKD = ifelse(CKD == "CKD", 1, 0)
-  ) %>%
-  mutate(
-    SEX_factor = ifelse(SEX == "Female", 1, 0) #0 is male, 1 is female
-  ) 
+  )
+```
 
-df_filter$CKD_factor <- factor(df_filter$CKD, 
-                              levels = c(0, 1))
 
-df_filter$SEX_factor <- factor(df_filter$SEX_factor, 
-                              levels = c(0, 1))
-
-df_filter$ALC_freq_3_factor <- factor(df_filter$ALC_freq_3)
-
+```{r}
+# Convert variables to factors
 df_filter <- df_filter %>% 
   mutate(
-    CKD = ifelse(CKD == "CKD", 1, 0),
+    CKD = factor(
+      ifelse(CKD == "CKD", 1, 0),
+      levels = c(0, 1)
+    ),
     SEX_factor = factor(
       SEX,
       levels = c("Female", "Male")
@@ -509,6 +501,29 @@ df_filter <- df_filter %>%
         "No alcohol (≥12 months)",
         "Never alcohol"
       )
+    ),
+    ALC_freq_3_factor = factor(df_filter$ALC_freq_3),
+    across(
+      c(
+        Low_alcohol_beer,
+        Mid_strength_beer,
+        Full_strength_beer,
+        White_wine,
+        Red_wine,
+        Low_alcohol_wine,
+        Champagne_sparkling_wine,
+        Spirits_RTD,
+        Liqueurs,
+        Spirits,
+        Fortified_wine,
+        Cider,
+        Cocktails
+      ),
+      ~ factor(
+          .x,
+          levels = c(0, 1),
+          labels = c("No", "Yes")
+        )
     )
   )
 
