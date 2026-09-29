@@ -46,21 +46,14 @@ df %>%
 ckd_data <- df %>%
   mutate(
     AGE = case_when(
-      AGEB == 5 ~ "18 - 19 years",
-      AGEB == 6 ~ "20 - 24 years", 
-      AGEB == 7 ~ "25 - 29 years", 
-      AGEB == 8 ~ "30 - 34 years", 
-      AGEB == 9 ~ "35 - 39 years", 
-      AGEB == 10 ~ "40 - 44 years", 
-      AGEB == 11 ~ "45 - 49 years", 
-      AGEB == 12 ~ "50 - 54 years", 
-      AGEB == 13 ~ "55 - 59 years", 
-      AGEB == 14 ~ "60 - 64 years", 
-      AGEB == 15 ~ "65 - 69 years", 
-      AGEB == 16 ~ "70 - 74 years", 
-      AGEB == 17 ~ "75 - 79 years", 
-      AGEB == 18 ~ "80 - 84 years", 
-      AGEB == 19 ~ "85 years and over", 
+      AGEB %in% 1:4 ~ NA_character_,
+      AGEB %in% c(5, 6, 7) ~ "18 - 29 years",
+      AGEB %in% c(8, 9) ~ "30 - 39 years",
+      AGEB %in% c(10, 11) ~ "40 - 49 years",
+      AGEB %in% c(12, 13) ~ "50 - 59 years", 
+      AGEB %in% c(14, 15) ~ "60 - 69 years",  
+      AGEB %in% c(16, 17) ~ "70 - 79 years", 
+      AGEB%in% c(18, 19) ~ "80 years and over", 
     ),
     SEX = case_when(
       SEX == 1 ~ "Male",
@@ -456,21 +449,13 @@ df_filter <- df_filter %>%
     AGE = factor(
      AGE,
       levels = c(
-        "18 - 19 years",
-        "20 - 24 years",
-        "25 - 29 years",
-        "30 - 34 years",
-        "35 - 39 years",
-        "40 - 44 years",
-        "45 - 49 years",
-        "50 - 54 years",
-        "55 - 59 years",
-        "60 - 64 years",
-        "65 - 69 years",
-        "70 - 74 years",
-        "75 - 79 years",
-        "80 - 84 years",
-        "85 years and over"
+        "18 - 29 years",
+        "30 - 39 years",
+        "40 - 49 years",
+        "50 - 59 years",
+        "60 - 69 years",
+        "70 - 79 years",
+        "80 years and over"
       )
     ),
           
