@@ -15,9 +15,9 @@ library(here)
 ```{r}
 df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
-                
+
 df <- df1 %>%
-  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B, SMKAGEDB) %>%
+  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B, SMKAGEDB, ALCF3) %>%
   left_join(
     df2 %>% select(ABSLID, ABSPID, EGFRKDSA, ACRNTR, ACRIPA, EGFRIMP, EGFRRESB, VDLCMRGT, FOLATREB, B12RESB, FERRCRPB),
     by = c("ABSLID", "ABSPID")
@@ -99,13 +99,32 @@ ckd_data <- df %>%
     FERRCRPB %in% 9:11 ~ "≥300 µg/L",
     FERRCRPB %in% c(97, 98) ~ NA_character_
   ),
+  
   Vitamin_D = case_when(
   VDLCMRGT == 1 ~ "Adequate (≥50 nmol/L)",
   VDLCMRGT == 2 ~ "Mild deficiency (30–49 nmol/L)",
   VDLCMRGT == 3 ~ "Moderate/severe deficiency (<30 nmol/L)",
   VDLCMRGT %in% c(0, 8) ~ NA_character_
-)
+  ),
+      
+  ALC_freq_3 = case_when(
+  ALCF3 == 0 ~ "Never drink",
+  ALCF3 == 1 ~ "Everyday",
+  ALCF3 == 2 ~ "6 days a week",
+  ALCF3 == 3 ~ "5 days a week",
+  ALCF3 == 4 ~ "4 days a week",
+  ALCF3 == 5 ~ "3 days a week",
+  ALCF3 == 6 ~ "2 days a week",
+  ALCF3 == 7 ~ "1 day a week",
+  ALCF3 == 98 ~ "NA_character_",
+  ALCF3 == 97 ~ "NA_character_",
+  ALCF3 == 99 ~ "NA_character_",
+  ALCF3 %in% c(8, 9, 10) ~ "Less often than 1 day a week"
+  
   )
+  
+  ) 
+
 ```
 
 
@@ -133,6 +152,9 @@ ggplot(ckd_prop, aes(x = factor(CKD),
     fill = "Sex"
   ) +
   theme_minimal()
+
+
+
 ```
 
 Alcohol Section of Dataset.
@@ -145,7 +167,9 @@ alcohol_type <- read.csv(here("data", "AHSnhs11b14.csv"), stringsAsFactors = TRU
     ABSBID,
     ABSTID,
     ALCTYPT,
-    TOTPALCR
+    TOTPALCR,
+    ALCSDCDT,
+    
   )
 ```
 
@@ -160,7 +184,8 @@ alcohol_quantity <- df1 %>%
     alcohol_quantity = case_when(
       ALINWKSD == 97 ~ 0,          # Did not drink last week
       ALINWKSD >= 0 & ALINWKSD <= 96 ~ ALINWKSD,  # Actual alcohol intake in last week 
-      ALINWKSD %in% c(98, 99) ~ NA_real_  # Not stated/unknown or not applicable
+      ALINWKSD %in% c(98, 99) ~ NA_real_  # Not stated/unknown or not applicable,
+   
     )
   )
 ```
@@ -189,6 +214,8 @@ alcohol_type <- alcohol_type %>%
       ALCTYPT == 13 ~ "Cocktails",
       ALCTYPT == 14 ~ "Other",
       ALCTYPT == 0 ~ NA_character_
+      
+      ALCSDCDT
     )
   )
 ```
@@ -223,6 +250,12 @@ df_final <- ckd_data %>%
     by = c("ABSLID", "ABSPID")
   )
 ```
+```{r}
+alcohol_type %>%
+  count(alcohol_type)
+```
+
+
 
 ```{r}
 alcohol_type_prop <- df_final %>%
@@ -260,6 +293,8 @@ alcohol <- c("Low_alcohol_beer", "Mid_strength_beer", "Full_strength_beer", "Low
 ```
 
 ```{r}
+
+
 ggplot(
   alcohol_type_prop %>% filter(CKD == "CKD"),
   aes(
@@ -271,6 +306,7 @@ ggplot(
   geom_col(position = "dodge") +
   scale_x_discrete(labels = c("Low alcoholic beer", "Mid strength Beer",  "Full strength Beer", "Low alcoholic wine", "White Wine",  "Red Wine", "Fortified Wine", "Champagne",  "Ready to drink spirits/liquers",  "Liquers", "Spirits" , "Cider", "Cocktails")) +
 
+  
   scale_y_continuous(labels = scales::percent) +
   labs(
     x = "Alcohol type",
@@ -281,6 +317,30 @@ ggplot(
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
+
+plot_data <- ckd_data %>%
+  group_by(ALC_freq_3, SEX) %>%
+  summarise(
+    proportion = mean(CKD == "CKD", na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ckd_data %>%
+  count(ALC_freq_3, SEX, CKD)
+
+ggplot(plot_data, aes(x = factor(ALC_freq_3),
+                      y = proportion,
+                      fill = factor(SEX))) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Alcohol freq",
+    y = "Proportion with CKD",
+    fill = "Sex"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
 
 
 ```
@@ -460,17 +520,63 @@ ggsave(here("figures", "new_micronutrient_CKD.png"))
 ```
 
 ```{r}
+
+#Not including Smoking/Micronutrient Data
+
+
+
 df_filter <- df_final %>%
+  select(
+    SEX,
+    CKD,
+    alcohol_quantity,
+    Low_alcohol_beer,
+    Mid_strength_beer,
+    Full_strength_beer,
+    White_wine,
+    Red_wine,
+    Low_alcohol_wine,
+    Champagne_sparkling_wine,
+    Spirits_RTD,
+    Liqueurs,
+    Spirits,
+    Fortified_wine,
+    Cider,
+    Cocktails,
+    ALC_freq_3
+    
+  ) %>%
   filter(
     !is.na(SEX),
     !is.na(CKD),
     !is.na(alcohol_quantity),
-    !is.na(Red_wine)
+    !is.na(Red_wine),
+    !is.na(ALC_freq_3)
+    
   ) %>%
   mutate(
     CKD = ifelse(CKD == "CKD", 1, 0)
-  )
+  ) %>%
+  mutate(
+    SEX_factor = ifelse(SEX == "Female", 1, 0) #0 is male, 1 is female
+  ) 
+
+df_filter$CKD_factor <- factor(df_filter$CKD, 
+                              levels = c(0, 1))
+
+df_filter$SEX_factor <- factor(df_filter$SEX_factor, 
+                              levels = c(0, 1))
+
+df_filter$ALC_freq_3_factor <- factor(df_filter$ALC_freq_3)
 
 saveRDS(df_filter, "shared_df_filter.rds")
+
+
+
+
+
+
+#We need to do the smoking / micronutrient secondary study in a separate data frame (It removes more people)
 ```
+
 

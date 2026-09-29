@@ -1,5 +1,74 @@
 ---
-title: "regression_tree"
+title: "random_forest"
 output: html_document
 ---
+
+```{r}
+
+library(ISLR)
+library(rpart)
+library(rpart.plot)
+library(tidyverse)
+library(randomForest)
+library(dplyr)
+library(ranger)
+library(pROC)
+
+
+bev_cols <- c("Low_alcohol_beer","Mid_strength_beer","Full_strength_beer",
+              "White_wine","Red_wine","Low_alcohol_wine",
+              "Champagne_sparkling_wine","Spirits_RTD","Liqueurs",
+              "Spirits","Fortified_wine","Cider","Cocktails")
+
+rf_data <- df_filter %>%
+  mutate(
+    CKD_factor = factor(CKD, levels = c(0, 1), labels = c("No_CKD", "CKD")),
+    SEX_factor = factor(SEX_factor, levels = c(0, 1), labels = c("Male", "Female")),
+  ) %>%
+  select(-CKD, -SEX) %>%   # drop the raw versions so they don't leak into the model
+  na.omit()
+
+#Need to fix class imbalance
+
+table(train$CKD_factor) / nrow(train)   # check class imbalance
+
+set.seed(123)
+idx   <- sample(nrow(rf_data), 0.7 * nrow(rf_data))
+train <- rf_data[idx, ]
+test  <- rf_data[-idx, ]
+
+train_maj <- train %>% filter(CKD_factor == "No_CKD")
+train_min <- train %>% filter(CKD_factor == "CKD")
+
+train_up <- bind_rows(
+  train_maj,
+  train_min[sample(nrow(train_min), nrow(train_maj), replace = TRUE), ]
+)
+
+table(train_up$CKD_factor)   # should now be balanced
+
+rf <- randomForest(
+  CKD_factor ~ .,
+  data = train_up,
+  ntree = 500,
+  importance = TRUE
+)
+
+# Evaluate on the untouched test set
+pred_class <- predict(rf, test)
+pred_prob  <- predict(rf, test, type = "prob")[, "CKD"]
+
+table(Predicted = pred_class, Actual = test$CKD_factor)
+auc(roc(test$CKD_factor, pred_prob))
+
+importance(rf)     # MeanDecreaseAccuracy = permutation importance
+varImpPlot(rf)
+
+tree <- rpart(CKD_factor ~ ., data = train_up, method = "class",
+              control = rpart.control(cp = 0.005, minbucket = 30))
+rpart.plot(tree)
+
+
+
+```
 

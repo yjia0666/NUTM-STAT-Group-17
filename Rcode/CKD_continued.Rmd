@@ -27,12 +27,7 @@ df_2 <- df3 %>%
     by = c("ABSHID", "ABSGID")
   )
 
-merged_df <- left_join(df, df_2, by = c("ABSLID" = "ABSHID", "ABSPID"="ABSGID", "EGFRKDSA", "ACRNTR", "ACRIPA", "EGFRIMP", "EGFRRESB")) %>%
-  mutate(SEX = coalesce(SEX.x, SEX.y)) %>%
-  select(-SEX.x, -SEX.y) %>%
-  mutate(SMKSTAT = coalesce(SMKSTAT.x, SMKSTAT.y)) %>%
-  select(-SMKSTAT.x, -SMKSTAT.y)
-
+merged_df <- bind_rows(df, df_2)
 
 ```
 
