@@ -5,7 +5,7 @@ output: html_document
 
 ```{r}
 
-library(ISLR)
+library(caret)
 library(rpart)
 library(rpart.plot)
 library(tidyverse)
@@ -13,6 +13,12 @@ library(randomForest)
 library(dplyr)
 library(ranger)
 library(pROC)
+library(ggplot2)
+library(pdp)
+
+set.seed(123)
+
+df_filter <- readRDS("shared_df_filter.rds")
 
 
 bev_cols <- c("Low_alcohol_beer","Mid_strength_beer","Full_strength_beer",
@@ -21,54 +27,87 @@ bev_cols <- c("Low_alcohol_beer","Mid_strength_beer","Full_strength_beer",
               "Spirits","Fortified_wine","Cider","Cocktails")
 
 rf_data <- df_filter %>%
-  mutate(
-    CKD_factor = factor(CKD, levels = c(0, 1), labels = c("No_CKD", "CKD")),
-    SEX_factor = factor(SEX_factor, levels = c(0, 1), labels = c("Male", "Female")),
-  ) %>%
-  select(-CKD, -SEX) %>%   # drop the raw versions so they don't leak into the model
-  na.omit()
+  select(-SEX, -Alcohol_risk, -ALC_freq_3) 
+
+table(train$CKD) / nrow(train)   # check class imbalance
 
 #Need to fix class imbalance
 
-table(train$CKD_factor) / nrow(train)   # check class imbalance
-
-set.seed(123)
 idx   <- sample(nrow(rf_data), 0.7 * nrow(rf_data))
 train <- rf_data[idx, ]
 test  <- rf_data[-idx, ]
 
-train_maj <- train %>% filter(CKD_factor == "No_CKD")
-train_min <- train %>% filter(CKD_factor == "CKD")
+train_maj <- train %>% filter(CKD == "0")
+train_min <- train %>% filter(CKD == "1")
+
 
 train_up <- bind_rows(
   train_maj,
   train_min[sample(nrow(train_min), nrow(train_maj), replace = TRUE), ]
 )
 
-table(train_up$CKD_factor)   # should now be balanced
+table(train_up$CKD)   # should now be balanced
 
-rf <- randomForest(
-  CKD_factor ~ .,
-  data = train_up,
-  ntree = 500,
-  importance = TRUE
-)
+rf <- randomForest(CKD ~ .,
+                  data = train_up,
+                  ntree = 500,
+                  importance = TRUE,
+ )
+
+rf
 
 # Evaluate on the untouched test set
 pred_class <- predict(rf, test)
-pred_prob  <- predict(rf, test, type = "prob")[, "CKD"]
+pred_prob  <- predict(rf, test, type = "prob")[, "1"]
 
-table(Predicted = pred_class, Actual = test$CKD_factor)
-auc(roc(test$CKD_factor, pred_prob))
+table(Predicted = pred_class, Actual = test$CKD)
+auc(roc(test$CKD, pred_prob))
 
-importance(rf)     # MeanDecreaseAccuracy = permutation importance
-varImpPlot(rf)
 
-tree <- rpart(CKD_factor ~ ., data = train_up, method = "class",
+tree <- rpart(CKD ~ ., data = train_up, method = "class",
               control = rpart.control(cp = 0.005, minbucket = 30))
-rpart.plot(tree)
 
+```
 
+Predicted CKD risk across alcohol quantity levels, were viewed separately by sex. A 2-way partial dependence plot of alcohol quantity and sex was mapped simultaneously against the variable CKD.
+```{r}
+
+pd <- partial(rf, pred.var = c("SEX_factor", "alcohol_quantity"), grid.resolution = 40, chull = TRUE)
+
+autoplot(pd, contour = TRUE) +
+  labs(title = "2D Partial Dependence Plot for Random Forest",
+       x = "Sex",
+       y = "Alcohol quantity in last week",
+       fill = "Partial\nDependence") +
+  theme_minimal()
+```
+
+The effect of alcohol quantity changes, depending on sex. This does indicate an interaction effect between sex and alcohol consumption on CKD. 
+
+```{r}
+#Plot with highly-aesthetic arguments
+rpart.plot(tree, 
+           type = 2,               # Split labels below the nodes
+           extra = 104,            # Displays class, probabilities, and % of obs
+           shadow.col = "gray",    # Subtle drop shadow under boxes
+           nn = TRUE,              # Display node numbers
+           faclen = 0)              
+
+ts_class_err <- 1 - confusionMatrix(rf_data$CKD,
+                                    predict(rf,
+                                    newdata=rf_data,
+                                    type="class"))$byClass["Recall"]
+
+ts_class_err[1:2]
+
+# MeanDecreaseAccuracy = permutation importance
+
+options(digits=2)
+rf$importance[,1:4]
+varImpPlot(rf) #Shows what variables contributed most to the random forest
+
+#Vote matrix
+rf$votes
 
 ```
 
