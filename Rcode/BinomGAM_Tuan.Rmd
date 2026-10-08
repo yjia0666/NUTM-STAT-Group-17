@@ -1,0 +1,256 @@
+---
+title: "XGBoost_Tuan"
+output: html_document
+---
+```{r}
+library(dplyr)
+library(xgboost)
+library(mgcv)
+library(ggplot2)
+library(emmeans)
+```
+
+```{r}
+data = readRDS("Rcode/shared_df_filter.rds")
+```
+
+```{r}
+n = nrow(data)
+glimpse(data)
+table(data$AGE)
+```
+
+
+```{r}
+unique(data$ALC_freq_3)
+```
+
+
+```{r}
+filtered = data |> select(
+  -SEX,
+  -ALC_freq_3
+)
+glimpse(filtered)
+
+levels(filtered$SEX_factor)
+```
+
+
+
+```{r}
+# CKD: 1 = has CKD, 0 = does not
+# Testing for alcohol types
+alc_type_fit <- gam(
+  CKD ~ SEX_factor + AGE +
+    s(alcohol_quantity, by = SEX_factor, k = 5) +
+    Low_alcohol_beer + Mid_strength_beer + Full_strength_beer +
+    White_wine + Red_wine + Low_alcohol_wine +
+    Champagne_sparkling_wine + Spirits_RTD + Liqueurs +
+    Spirits + Fortified_wine + Cider + Cocktails,
+  data = filtered,
+  family = binomial(link = "logit"),
+  method = "REML"
+)
+summary(alc_type_fit)
+```
+
+
+```{r}
+# Exact observations used in the age-adjusted GAM
+d <- model.frame(alc_type_fit)
+
+drink_types <- c(
+  "Low_alcohol_beer", "Mid_strength_beer", "Full_strength_beer",
+  "White_wine", "Red_wine", "Low_alcohol_wine",
+  "Champagne_sparkling_wine", "Spirits_RTD", "Liqueurs",
+  "Spirits", "Fortified_wine", "Cider", "Cocktails"
+)
+
+f <- reformulate(
+  c("AGE", "alcohol_quantity * SEX_factor", drink_types),
+  response = "CKD"
+)
+
+m_int <- glm(f, data = d, family = binomial())
+
+m_common <- update(
+  m_int,
+  . ~ . - alcohol_quantity:SEX_factor
+)
+
+# Direct test: do quantity slopes differ by sex?
+anova(m_common, m_int, test = "Chisq")
+```
+
+
+```{r}
+slopes <- emtrends(
+  m_int,
+  ~ SEX_factor,
+  var = "alcohol_quantity",
+  nuisance = c("AGE", drink_types)
+)
+
+# Sex-specific odds ratios and 95% confidence intervals
+results <- as.data.frame(confint(slopes))
+
+data.frame(
+  Sex = results$SEX_factor,
+  OR = exp(results$alcohol_quantity.trend),
+  Lower_95 = exp(results$asymp.LCL),
+  Upper_95 = exp(results$asymp.UCL)
+)
+
+# Direct comparison of quantity slopes between sexes
+pairs(slopes)
+```
+
+
+```{r}
+# 7day is determined by alc quantity
+ggplot(
+  filtered,
+  aes(
+    x = Alcohol_risk_7day,
+    y = alcohol_quantity,
+    colour = CKD
+  )
+) +
+  geom_jitter(
+    width = 0.2,
+    height = 0,
+    alpha = 0.45,
+    size = 1.5
+  ) +
+  scale_colour_manual(
+    values = c("0" = "#0072B2", "1" = "#D55E00"),
+    breaks = c("0", "1"),
+    labels = c("No CKD", "CKD")
+  ) +
+  labs(
+    x = "Alcohol risk category",
+    y = "Alcohol quantity",
+    colour = "CKD status"
+  ) + 
+  facet_wrap(~ SEX_factor) +
+  theme_minimal()
+```
+
+```{r}
+# Testing for alcohol risk(s)
+risk_fit <- gam(
+  CKD ~ SEX_factor + AGE + Alcohol_risk_7day + Alcohol_risk +
+    s(alcohol_quantity, by = SEX_factor, k = 5),
+  data = filtered,
+  family = binomial(link = "logit"),
+  method = "REML"
+)
+summary(risk_fit)
+```
+
+```{r}
+d <- filtered %>%
+  mutate(CKD_num = as.integer(as.character(CKD))) %>%
+  filter(
+    !is.na(CKD_num),
+    !is.na(SEX_factor),
+    is.finite(alcohol_quantity)
+  )
+
+# Common quantity groups across sexes
+cuts <- unique(quantile(
+  d$alcohol_quantity,
+  probs = seq(0, 1, length.out = 9)
+))
+
+binned <- d %>%
+  mutate(quantity_bin = cut(
+    alcohol_quantity, breaks = cuts, include.lowest = TRUE
+  )) %>%
+  group_by(SEX_factor, quantity_bin) %>%
+  summarise(
+    quantity = mean(alcohol_quantity),
+    n = n(),
+    cases = sum(CKD_num),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    prevalence = cases / n,
+    denominator = 1 + 1.96^2 / n,
+    centre = (prevalence + 1.96^2 / (2 * n)) / denominator,
+    margin = 1.96 * sqrt(
+      prevalence * (1 - prevalence) / n + 1.96^2 / (4 * n^2)
+    ) / denominator,
+    lower = centre - margin,
+    upper = centre + margin
+  )
+
+ggplot(binned, aes(quantity, prevalence)) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0) +
+  geom_point(aes(size = n)) +
+  facet_wrap(~ SEX_factor) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  labs(
+    x = "Alcohol quantity",
+    y = "Observed CKD prevalence",
+    size = "Participants"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(d, aes(alcohol_quantity, CKD_num)) +
+  geom_smooth(
+    aes(colour = "Logistic"),
+    method = "glm",
+    method.args = list(family = binomial()),
+    formula = y ~ x,
+    se = FALSE
+  ) +
+  geom_smooth(
+    aes(colour = "GAM"),
+    method = "gam",
+    method.args = list(family = binomial(), method = "REML"),
+    formula = y ~ s(x, k = 5),
+    se = FALSE
+  ) +
+  geom_point(
+    data = binned,
+    aes(x = quantity, y = prevalence, size = n),
+    inherit.aes = FALSE,
+    alpha = 0.6
+  ) +
+  facet_wrap(~ SEX_factor) +
+  scale_colour_manual(
+    values = c("Logistic" = "#0072B2", "GAM" = "#D55E00")
+  ) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  labs(
+    x = "Alcohol quantity",
+    y = "CKD probability",
+    colour = "Unadjusted model",
+    size = "Participants"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# m_int includes:
+# alcohol_quantity * SEX_factor + AGE + drink-type indicators
+
+# Remove only the interaction; retain all adjustment variables
+m_no_int <- update(
+  m_int,
+  . ~ . - alcohol_quantity:SEX_factor
+)
+
+# Check both models use identical observations
+stopifnot(identical(
+  rownames(model.frame(m_no_int)),
+  rownames(model.frame(m_int))
+))
+
+anova(m_no_int, m_int, test = "Chisq")
+```
+

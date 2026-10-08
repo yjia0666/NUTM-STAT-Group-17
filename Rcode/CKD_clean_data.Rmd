@@ -467,7 +467,7 @@ df_filter <- df_filter %>%
         "Never alcohol"
       )
     ),
-    
+
     across(
       c(
         Low_alcohol_beer,
