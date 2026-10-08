@@ -46,14 +46,14 @@ df %>%
 ckd_data <- df %>%
   mutate(
     AGE = case_when(
-      AGEB %in% 1:4 ~ NA_character_,
-      AGEB %in% c(5, 6, 7) ~ "18 - 29 ",
-      AGEB %in% c(8, 9) ~ "30 - 39 ",
-      AGEB %in% c(10, 11) ~ "40 - 49 ",
-      AGEB %in% c(12, 13) ~ "50 - 59 ", 
-      AGEB %in% c(14, 15) ~ "60 - 69 ",  
-      AGEB %in% c(16, 17) ~ "70 - 79 ", 
-      AGEB%in% c(18, 19) ~ "≥ 80 ", 
+      AGEB %in% 1:4 ~ NA_real_,
+      AGEB %in% c(5, 6, 7) ~ 23.5,
+      AGEB %in% c(8, 9) ~ 35,
+      AGEB %in% c(10, 11) ~ 45,
+      AGEB %in% c(12, 13) ~ 55 , 
+      AGEB %in% c(14, 15) ~ 65,  
+      AGEB %in% c(16, 17) ~ 75, 
+      AGEB%in% c(18, 19) ~ 85, 
     ),
     SEX = case_when(
       SEX == 1 ~ "Male",
@@ -121,19 +121,18 @@ ckd_data <- df %>%
   ),
       
   ALC_freq_3 = case_when(
-  ALCF3 == 0 ~ "Never drink",
-  ALCF3 == 1 ~ "Everyday",
-  ALCF3 == 2 ~ "6 days a week",
-  ALCF3 == 3 ~ "5 days a week",
-  ALCF3 == 4 ~ "4 days a week",
-  ALCF3 == 5 ~ "3 days a week",
-  ALCF3 == 6 ~ "2 days a week",
-  ALCF3 == 7 ~ "1 day a week",
-  ALCF3 == 98 ~ NA_character_,
-  ALCF3 == 97 ~ NA_character_,
-  ALCF3 == 99 ~ NA_character_,
-  ALCF3 %in% c(8, 9, 10) ~ "Less often than 1 day a week"
-  ),
+  ALCF3 == 1 ~ 7,
+  ALCF3 == 2 ~ 6,
+  ALCF3 == 3 ~ 5,
+  ALCF3 == 4 ~ 4,
+  ALCF3 == 5 ~ 3,
+  ALCF3 == 6 ~ 2,
+  ALCF3 == 7 ~ 1,
+  ALCF3 == 98 ~ NA_real_,
+  ALCF3 == 97 ~ NA_real_,
+  ALCF3 == 99 ~ NA_real_,
+  ALCF3 %in% c(0, 8, 9, 10) ~ 0
+  ), #How many days a week, that they drink three or more standards, over the last year
 
     Vitamin_D = case_when(
     VDLCMRGT == 1 ~ "Adequate (≥50 nmol/L)",
@@ -446,18 +445,6 @@ df_filter <- df_filter %>%
       SEX,
       levels = c("Female", "Male")
     ),
-    AGE = factor(
-     AGE,
-      levels = c(
-        "18 - 29 ",
-        "30 - 39 ",
-        "40 - 49 ",
-        "50 - 59 ",
-        "60 - 69 ",
-        "70 - 79 ",
-        "≥ 80"
-      )
-    ),
           
      Alcohol_risk = factor(
       Alcohol_risk,
@@ -480,7 +467,7 @@ df_filter <- df_filter %>%
         "Never alcohol"
       )
     ),
-    ALC_freq_3_factor = factor(df_filter$ALC_freq_3),
+    
     across(
       c(
         Low_alcohol_beer,
@@ -505,10 +492,18 @@ df_filter <- df_filter %>%
     )
   )
 
+df_filter
+
 saveRDS(df_filter, "shared_df_filter.rds")
 
 #We need to do the smoking / micronutrient secondary study in a separate data frame (It removes more people)
+
 ```
+
+```
+    ALC_freq_3_factor = factor(df_filter$ALC_freq_3),
+```
+
 
 
 ```{r}
@@ -650,5 +645,5 @@ ggplot(
   )
 ggsave(here("figures", "new_micronutrient_CKD.png"))
 
-```
 
+```

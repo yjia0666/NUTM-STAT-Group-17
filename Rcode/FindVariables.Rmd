@@ -80,7 +80,7 @@ for (file in unique(inp_file_list)) {
 ```{r}
 # Find the location of the variable
 variable_catalogue %>%
-  filter(Variable == "ALCSDCDT") # Or use regex: grepl("EXREG", Variable)
+  filter(Variable == "AGEB") # Or use regex: grepl("EXREG", Variable)
 ```
 
 ```{r}

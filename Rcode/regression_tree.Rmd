@@ -69,7 +69,13 @@ tree <- rpart(CKD ~ ., data = train_up, method = "class",
 
 ```
 
+```{r}
+mda_scores <- importance(rf, type = 1, scale = FALSE)
+
+```
+
 Predicted CKD risk across alcohol quantity levels, were viewed separately by sex. A 2-way partial dependence plot of alcohol quantity and sex was mapped simultaneously against the variable CKD.
+
 ```{r}
 
 pd <- partial(rf, pred.var = c("SEX_factor", "alcohol_quantity"), grid.resolution = 40, chull = TRUE)
@@ -82,7 +88,7 @@ autoplot(pd, contour = TRUE) +
   theme_minimal()
 ```
 
-The effect of alcohol quantity changes, depending on sex. This does indicate an interaction effect between sex and alcohol consumption on CKD. 
+The effect of alcohol quantity changes, depending on sex. This does indicate an interaction effect between sex and alcohol consumption on CKD. However this is not a formal hypothesis test. 
 
 ```{r}
 #Plot with highly-aesthetic arguments
