@@ -370,7 +370,6 @@ smoker_prop <- df_final %>%
 
 
 ```{r}
-
 micro_prop <- df_final %>%
   filter(
     !is.na(SEX),
@@ -416,7 +415,9 @@ df_filter <- df_final %>%
     ALC_freq_3,
     Alcohol_risk,
     Alcohol_risk_7day,
-    AGE
+    AGE,
+    smoker_status,
+    daily_smoke
     
   ) %>%
   filter(
@@ -427,7 +428,9 @@ df_filter <- df_final %>%
     !is.na(ALC_freq_3),
     !is.na(Alcohol_risk),
     !is.na(Alcohol_risk_7day),
-    !is.na(AGE)
+    !is.na(AGE),
+    !is.na(smoker_status),
+    !is.na(daily_smoke)
     
   )
 ```
