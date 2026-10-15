@@ -47,13 +47,21 @@ ckd_data <- df %>%
   mutate(
     AGE = case_when(
       AGEB %in% 1:4 ~ NA_real_,
-      AGEB %in% c(5, 6, 7) ~ 23.5,
-      AGEB %in% c(8, 9) ~ 35,
-      AGEB %in% c(10, 11) ~ 45,
-      AGEB %in% c(12, 13) ~ 55 , 
-      AGEB %in% c(14, 15) ~ 65,  
-      AGEB %in% c(16, 17) ~ 75, 
-      AGEB%in% c(18, 19) ~ 85, 
+      AGEB == 5 ~ 18.5,
+      AGEB == 6 ~ 22,
+      AGEB == 7 ~ 27,
+      AGEB == 8 ~ 32,
+      AGEB == 9 ~ 37,
+      AGEB == 10 ~ 42,
+      AGEB == 11 ~ 47,
+      AGEB == 12 ~ 52,
+      AGEB == 13 ~ 57,
+      AGEB == 14 ~ 62,
+      AGEB == 15 ~ 67,
+      AGEB == 16 ~ 72,
+      AGEB == 17 ~ 77,
+      AGEB == 18 ~ 82,
+      AGEB == 19 ~ 85, 
     ),
     SEX = case_when(
       SEX == 1 ~ "Male",
@@ -157,6 +165,16 @@ ckd_data <- df %>%
     AL2K7DAY == 5 ~ "No alcohol (≥12 months)",
     AL2K7DAY == 6 ~ "Never has alcohol",
     AL2K7DAY %in% c(0, 8, 9) ~ NA_character_
+  ),
+  
+  eGFR_range = case_when(
+    EGFRRESB == 1 ~ "90+",
+    EGFRRESB == 2 ~ "75-89",
+    EGFRRESB == 3 ~ "60-74",
+    EGFRRESB == 4 ~ "45-59",
+    EGFRRESB == 5 ~ "30-44",
+    EGFRRESB == 6 ~ "<30",
+    EGFRRESB %in% c(7,8) ~ NA_character_,
   )
   )
 ```
@@ -392,7 +410,7 @@ micro_prop <- df_final %>%
 ```
 
 ```{r}
-#Not including Smoking/Micronutrient Data
+#Not including Micronutrient Data
 
 df_filter <- df_final %>%
   select(
@@ -415,7 +433,10 @@ df_filter <- df_final %>%
     ALC_freq_3,
     Alcohol_risk,
     Alcohol_risk_7day,
-    AGE
+    AGE,
+    smoker_status,
+    daily_smoke,
+    eGFR_range,
     
   ) %>%
   filter(
@@ -426,9 +447,16 @@ df_filter <- df_final %>%
     !is.na(ALC_freq_3),
     !is.na(Alcohol_risk),
     !is.na(Alcohol_risk_7day),
-    !is.na(AGE)
-    
+    !is.na(AGE),
+    !is.na(smoker_status),
+    !is.na(daily_smoke),
+    !is.na(eGFR_range),
+    AGE >= 35
   )
+```
+
+```{r}
+table(df_filter$eGFR_range)
 ```
 
 
@@ -451,9 +479,7 @@ df_filter <- df_filter %>%
       levels = c(
         "Low risk",
         "Risky",
-        "High risk",
-        "No alcohol (past year)",
-        "Never alcohol"
+        "High risk"
       )
     ),
     Alcohol_risk_7day = factor(
@@ -461,13 +487,44 @@ df_filter <- df_filter %>%
       levels = c(
         "Low risk",
         "Medium risk",
-        "High risk",
-        "No alcohol (1 week–<12 months)",
-        "No alcohol (≥12 months)",
-        "Never alcohol"
+        "High risk"
       )
     ),
-
+    smoker_status = factor(
+      smoker_status,
+      levels = c(
+        "Current smoker",
+        "Ex-smoker",
+        "Never smoked"
+      )
+    ),
+    daily_smoke = factor(
+      daily_smoke,
+      levels = c(
+      "Never smoked daily",
+      "Smoked daily for less than 10 years",
+      "Smoked daily for 10 - 29 years",
+      "Smoked daily for 30 years and over"
+    ),
+    labels = c(
+      "Never",
+      "<10 years",
+      "10-29 years",
+      "30+ years"
+    )
+    ),
+    eGFR_range = factor(
+      eGFR_range,
+      levels = c(
+        "<30",
+        "30-44",
+        "45-59",
+        "60-74",
+        "75-89",
+        "90+"
+      )
+    ),
+    
     across(
       c(
         Low_alcohol_beer,
@@ -492,16 +549,15 @@ df_filter <- df_filter %>%
     )
   )
 
-df_filter
-
 saveRDS(df_filter, "shared_df_filter.rds")
 
 #We need to do the smoking / micronutrient secondary study in a separate data frame (It removes more people)
 
 ```
 
-```
-    ALC_freq_3_factor = factor(df_filter$ALC_freq_3),
+
+```{r}
+ALC_freq_3_factor = factor(df_filter$ALC_freq_3)
 ```
 
 

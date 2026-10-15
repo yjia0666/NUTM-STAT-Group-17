@@ -3,6 +3,8 @@ title: "logistic_Yilan"
 output: html_document
 date: "2026-09-24"
 ---
+todo: independence, binary outcome, sample size, linearity, analysis of the summary output(no large SE, coeff)
+
 
 ```{r}
 library(dplyr)
@@ -16,8 +18,13 @@ ckd_filter <- readRDS("shared_df_filter.rds")
 ```
 
 ```{r}
-class(ckd_filter$Cider)
+table(ckd_filter$CKD)
 ```
+
+```{r}
+class(ckd_filter$AGE)
+```
+
 
 ```{r}
 table(ckd_filter$AGE, useNA = "ifany") 
@@ -25,6 +32,10 @@ table(ckd_filter$AGE, useNA = "ifany")
 "Other" was excluded because all observations had a value of 0 and therefore provided no variation for the analysis.
 
 The “No alcohol (past year)” and “Never alcohol” categories contained no participants (n = 0) and were excluded from the regression analysis.
+
+```{r}
+table(ckd_filter$CKD[ckd_filter$Red_wine == 1])
+```
 
 ```{r}
 # number of people by number of alcohol types consumed
@@ -58,24 +69,32 @@ table(ckd_filter$n_alcohol_types)
 ```{r}
 dag_alcohol_ckd <- dagitty("
 dag {
-AGE -> Alcohol
+AGE -> quantity
 AGE -> CKD
 
-SEX -> Alcohol
+SEX -> quantity
 SEX -> CKD
 
-Alcohol -> CKD
+quantity -> CKD
+
+frequency -> quantity
+frequency -> CKD
 }
 ")
 
 adj_alcohol_ckd <- adjustmentSets(
   dag_alcohol_ckd,
-  exposure = "Alcohol",
+  exposure = "quantity",
   outcome = "CKD"
 )
 
 adj_alcohol_ckd
 ```
+
+```{r}
+summary(ckd_filter$AGE)
+```
+
 
 
 ### Full model
@@ -84,6 +103,7 @@ adj_alcohol_ckd
 full_model <- glm(CKD ~ Alcohol_risk * SEX_factor + alcohol_quantity * SEX_factor + AGE + ALC_freq_3_factor + Low_alcohol_beer + Mid_strength_beer + Full_strength_beer + White_wine + Red_wine + Low_alcohol_wine + Champagne_sparkling_wine + Champagne_sparkling_wine + Spirits_RTD + Liqueurs + Fortified_wine + Cider + Cocktails, data = ckd_filter, family = binomial)
 summary(full_model)
 ```
+
 
 ```{r}
 vif(full_model)
@@ -179,7 +199,7 @@ Note: Other is not a variable from the original dataset. It represents cider or 
 ### Only quantity
 ```{r}
 # Using combined predictors, only quantity
-model_quantity_int <- glm(CKD ~ AGE + alcohol_quantity * SEX_factor + Beer + Wine + Spirits_Liqueurs + Cider + Cocktails, data = ckd_filter, family = binomial)
+model_quantity_int <- glm(CKD ~ AGE + alcohol_quantity * SEX_factor + ALC_freq_3 + Beer + Wine + Spirits_Liqueurs + Cider + Cocktails, data = ckd_filter, family = binomial)
 summary(model_quantity_int)
 ```
 
@@ -188,7 +208,7 @@ interaction p: >0.05 but very close?
 
 
 ```{r}
-model_quantity_no_int <- glm(CKD ~ alcohol_quantity + SEX_factor + Beer + Wine + Spirits_Liqueurs + Cider + Cocktails, data = ckd_filter, family = binomial)
+model_quantity_no_int <- glm(CKD ~ alcohol_quantity + SEX_factor + ALC_freq_3 + Beer + Wine + Spirits_Liqueurs + Cider + Cocktails, data = ckd_filter, family = binomial)
 summary(model_quantity_no_int)
 ```
 
@@ -203,21 +223,77 @@ AIC(model_int_no_risk,model_no_risk)
 The likelihood-ratio test indicated that adding the interaction term significantly improved model fit, while the interaction model also had a slightly lower AIC
 
 ```{r}
-anova(model_int_no_risk)
+vif(model_quantity_int)
 ```
+
+Multicollinearity was assessed using the VIF. The adjusted VIF values ranged from 1.01 to 12.02, with the highest values observed for alcohol quantity (9.85) and the alcohol quantity × sex interaction (12.03). The higher VIF for the interaction term was considered reasonable because interaction terms can naturally result in higher VIF values.
+
+```{r}
+vif(model_quantity_no_int)
+```
+
+For comparison, the model without the interaction term showed lower VIFs, particularly for alcohol quantity, suggesting that the relatively higher VIFs observed in the interaction model may be associated with the interaction term. Overall, the results did not show the severe multicollinearity among predictors.
+
+
+```{r}
+plot(
+  ckd_filter$alcohol_quantity,
+  model_quantity_int$linear.predictors,
+  xlab = "Alcohol quantity",
+  ylab = "Linear predictor (logit)",
+  pch = 16,
+  cex = 0.5
+)
+
+lines(
+  lowess(
+    ckd_filter$alcohol_quantity,
+    model_quantity_int$linear.predictors
+  ),
+  col = "blue",
+  lwd = 2
+)
+
+```
+
+The LOWESS curve showed an approximately linear relationship between alcohol quantity and the logit of the outcome, with only minor deviations at lower levels of alcohol consumption. Thus the linearity assumption was reasonably met.
+
+### Cook's distance
+```{r}
+plot(model_quantity_int, which = 4)
+```
+
+```{r}
+cd <- cooks.distance(model_quantity_int)
+```
+
+```{r}
+sort(cd, decreasing = TRUE)[1:5]
+```
+Influential observations were assessed using Cook's distance. Several observations had relatively higher Cook's distances, the maximum value was 0.038. 
+
+Two observations had noticeably higher Cook's distances than the remaining observations and were therefore examined in detail.
+```{r}
+ckd_filter[
+  order(cd, decreasing = TRUE)[1:3],
+]
+```
+
+After reviewing these observations individually, no data errors were identified, and all observations were retained in the analysis.
+
 
 ### Only risk levels
 ```{r}
 # Risk no quantity
 model_risk_no_int <- glm(
-  CKD ~ Alcohol_risk + SEX_factor +
+  CKD ~ Alcohol_risk + SEX_factor + AGE +
         Beer + Wine + Spirits_Liqueurs + Cider + Cocktails,
   data = ckd_filter,
   family = binomial
 )
 
 model_risk_int <- glm(
-  CKD ~ Alcohol_risk * SEX_factor +
+  CKD ~ Alcohol_risk * SEX_factor + AGE +
         Beer + Wine + Spirits_Liqueurs + Cider + Cocktails,
   data = ckd_filter,
   family = binomial
@@ -241,14 +317,6 @@ anova(
 ```
 
 
-
-
-```{r}
-vif(model_no_int)
-```
-
-
-
 ### Quantity + risk levels
 ```{r}
 # Quantity + risk
@@ -270,13 +338,13 @@ No major multicollinearity!
 ```{r}
 # Male and female
 model_male <- glm(
-  CKD ~ alcohol_quantity + Alcohol_risk + Beer + Wine + Spirits_Liqueurs + Other,
+  CKD ~ Alcohol_risk +AGE + Beer + Wine + Spirits_Liqueurs + Other,
   data = subset(ckd_filter, SEX_factor == "Male"),
   family = binomial
 )
 
 model_female <- glm(
-  CKD ~ alcohol_quantity + Alcohol_risk + Beer + Wine + Spirits_Liqueurs + Other,
+  CKD ~ Alcohol_risk + AGE + Beer + Wine + Spirits_Liqueurs + Other,
   data = subset(ckd_filter, SEX_factor == "Female"),
   family = binomial
 )
@@ -287,7 +355,7 @@ summary(model_male)
 
 ```{r}
 emm <- emmeans(
-  model_int,
+  model_risk_int,
   ~ Alcohol_risk | SEX_factor
 )
 
@@ -312,4 +380,4 @@ include risk?
 
 ## Model Performance
 
-
+https://www.datanovia.com/learn/biostatistics/regression/logistic-regression-assumptions-and-diagnostics-in-r
