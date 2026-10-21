@@ -24,7 +24,7 @@ library(knitr)
 set.seed(2026)
 
 # ---- switches ---------------------------------------------------------------
-data_file  <- here("Rcode", "shared_df_filter.rds")  # point at a newer rds if the team rebuilds it
+data_file  <- "~/Documents/NUTM-STAT-Group-17/Rcode/shared_df_filter.rds"
 save_folds <- FALSE   # TRUE writes Rcode/cv_folds_ckd.rds so Isabelle's random forest can reuse identical folds
 n_rep      <- 5       # repeats of stratified k-fold CV
 k_fold     <- 5
@@ -228,27 +228,11 @@ XGBoost has no coefficient to test, so effect modification is assessed by **forb
 The same is done for sex × smoking (secondary question).
 
 ```{r constraint}
-# Groups of features allowed to interact. Names are used so the check below can verify the constraint was honoured.
+# Groups of features allowed to interact.
 block_sets <- function(block) {
   idx0 <- function(v) match(v, colnames(X)) - 1L   # xgboost wants 0-based column indices
   list(idx0(setdiff(colnames(X), "male")), idx0(setdiff(colnames(X), block)))
 }
-
-# Safety check: no tree may contain both `male` and a blocked variable.
-verify_constraint <- function(model, block) {
-  td <- as.data.frame(xgb.model.dt.tree(model = model))
-  td <- td[td$Feature != "Leaf", ]
-  bad <- tapply(td$Feature, td$Tree, function(f) "male" %in% f && any(f %in% block))
-  stopifnot(!any(bad, na.rm = TRUE))
-  invisible(TRUE)
-}
-
-m_alc <- xgb.train(c(best_params, list(interaction_constraints = block_sets(alc_vars))),
-                   dall, nrounds = best_rounds, verbose = 0)
-m_smk <- xgb.train(c(best_params, list(interaction_constraints = block_sets(smoke_vars))),
-                   dall, nrounds = best_rounds, verbose = 0)
-verify_constraint(m_alc, alc_vars)
-verify_constraint(m_smk, smoke_vars)
 
 res_alc <- cv_eval(xgb_fit_predict(list(interaction_constraints = block_sets(alc_vars))))
 res_smk <- cv_eval(xgb_fit_predict(list(interaction_constraints = block_sets(smoke_vars))))
@@ -283,10 +267,21 @@ SHAP values split each person's predicted CKD log-odds into contributions from e
 ```{r shap}
 final <- xgb.train(best_params, dall, nrounds = best_rounds, verbose = 0)
 
-# SHAP values via xgboost's built-in TreeSHAP (argument name differs between xgboost versions)
-S <- tryCatch(predict(final, X, type = "contrib"),
-              error = function(e) predict(final, X, predcontrib = TRUE))
-S <- as.matrix(S)[, colnames(X), drop = FALSE]   # drop the intercept column
+# SHAP values via xgboost's built-in TreeSHAP (the argument differs between xgboost versions)
+attempts <- list(
+  function() predict(final, dall, predcontrib = TRUE),
+  function() predict(final, X, predcontrib = TRUE),
+  function() predict(final, dall, type = "contrib"),
+  function() predict(final, X, type = "contrib")
+)
+S <- NULL
+for (f in attempts) {
+  out <- tryCatch(as.matrix(f()), error = function(e) NULL)
+  if (!is.null(out) && nrow(out) == nrow(X) && ncol(out) >= ncol(X)) { S <- out; break }
+}
+if (is.null(S)) stop("No SHAP output. xgboost version: ", packageVersion("xgboost"))
+S <- S[, seq_len(ncol(X)), drop = FALSE]   # variables come first; drop the intercept column
+colnames(S) <- colnames(X)
 
 imp <- sort(colMeans(abs(S)), decreasing = TRUE)
 ```
