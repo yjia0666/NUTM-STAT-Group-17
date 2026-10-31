@@ -1,0 +1,260 @@
+---
+title: "Report"
+output: html_document
+date: "2026-10-31"
+---
+
+```{r}
+library(readr)
+library(dplyr)
+library(stringr)
+library(tidyverse)
+library(here)
+```
+
+## Data cleaning
+
+```{r}
+df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
+df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
+
+df <- df1 %>%
+  select(ABSLID, ABSPID, SEX, SMKSTAT, ALCF3, AGEB, AGEDIABC, ALINWKSD) %>%
+  filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
+  left_join(
+      df2 %>%
+      filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
+      select(ABSLID, ABSPID, EGFRKDSA),
+      by = c("ABSLID", "ABSPID")
+    )
+```
+
+```{r}
+ckd_data <- df %>%
+  mutate(
+    age = case_when(
+      AGEB %in% 1:4 ~ NA_real_,
+      AGEB == 5 ~ 18.5,
+      AGEB == 6 ~ 22,
+      AGEB == 7 ~ 27,
+      AGEB == 8 ~ 32,
+      AGEB == 9 ~ 37,
+      AGEB == 10 ~ 42,
+      AGEB == 11 ~ 47,
+      AGEB == 12 ~ 52,
+      AGEB == 13 ~ 57,
+      AGEB == 14 ~ 62,
+      AGEB == 15 ~ 67,
+      AGEB == 16 ~ 72,
+      AGEB == 17 ~ 77,
+      AGEB == 18 ~ 82,
+      AGEB == 19 ~ 85, 
+    ),
+    sex = case_when(
+      SEX == 1 ~ "Male",
+      SEX == 2 ~ "Female",
+    ),
+    ckd = case_when(
+      EGFRKDSA == 1 ~ "No CKD",
+      EGFRKDSA %in% 2:6 ~ "CKD",
+      EGFRKDSA %in% c(0, 8) ~ NA_character_
+    ),
+    smoker_status = case_when(
+      SMKSTAT == 5 ~ "Never smoked",
+      SMKSTAT == 4 ~ "Ex-smoker",
+      SMKSTAT %in% c(1, 2, 3) ~ "Current smoker",
+      SMKSTAT == 0 ~ NA_character_
+    ),
+    alcohol_frequency = case_when(
+      ALCF3 == 1 ~ 7,
+      ALCF3 == 2 ~ 6,
+      ALCF3 == 3 ~ 5,
+      ALCF3 == 4 ~ 4,
+      ALCF3 == 5 ~ 3,
+      ALCF3 == 6 ~ 2,
+      ALCF3 == 7 ~ 1,
+      ALCF3 == 98 ~ NA_real_,
+      ALCF3 == 97 ~ NA_real_,
+      ALCF3 == 99 ~ NA_real_,
+      ALCF3 %in% c(0, 8, 9, 10) ~ 0
+    ), #How many days a week, that they drink three or more standards, over the last year
+    alcohol_quantity = case_when(
+      ALINWKSD == 97 ~ 0,
+      ALINWKSD >= 0 & ALINWKSD <= 96 ~ ALINWKSD,
+      ALINWKSD %in% c(98, 99) ~ NA_real_
+    ),
+    diabetes = case_when(
+      AGEDIABC %in% c(0, 9) ~ 0,
+      AGEDIABC %in% 1:5 ~ 1
+    )
+  )
+```
+
+```{r}
+alcohol_type <- read.csv(here("data", "AHSnhs11b14.csv"), stringsAsFactors = TRUE) %>%
+  select(
+    ABSLID,
+    ABSPID,
+    ABSBID,
+    ABSTID,
+    ALCTYPT,
+  )
+```
+
+```{r}
+alcohol_type <- alcohol_type %>%
+  mutate(
+    alcohol_type = case_when(
+      ALCTYPT == 1 ~ "low_alcohol_beer",
+      ALCTYPT == 2 ~ "mid_strength_beer",
+      ALCTYPT == 3 ~ "full_strength_beer",
+      ALCTYPT == 4 ~ "white_wine",
+      ALCTYPT == 5 ~ "red_wine",
+      ALCTYPT == 6 ~ "low_alcohol_wine",
+      ALCTYPT == 7 ~ "champagne_sparkling_wine",
+      ALCTYPT == 8 ~ "spirits_rtd",
+      ALCTYPT == 9 ~ "liqueurs",
+      ALCTYPT == 10 ~ "spirits",
+      ALCTYPT == 11 ~ "fortified_wine",
+      ALCTYPT == 12 ~ "cider",
+      ALCTYPT == 13 ~ "cocktails",
+      ALCTYPT == 14 ~ "other",
+      ALCTYPT == 0 ~ NA_character_
+    )
+  )
+```
+
+```{r}
+# Keep one record for each participant and alcohol type
+alcohol_type_person <- alcohol_type %>%
+  filter(!is.na(alcohol_type)) %>%
+  distinct(ABSLID, ABSPID, alcohol_type) %>%
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = alcohol_type,
+    values_from = value,
+    values_fill = 0
+  )
+```
+
+```{r}
+# Combine alcohol type and alcohol quantity at the participant level
+df_final <- ckd_data %>%
+  left_join(
+    alcohol_type_person,
+    by = c("ABSLID", "ABSPID")
+  )
+```
+
+```{r}
+df_filter <- df_final %>%
+  filter(
+    !is.na(sex),
+    !is.na(ckd),
+    !is.na(alcohol_quantity),
+    !is.na(red_wine),
+    !is.na(alcohol_frequency),
+    !is.na(age),
+    !is.na(smoker_status),
+    !is.na(diabetes),
+    age >= 35
+  ) %>%
+  mutate(
+    ckd = factor(
+      ifelse(ckd == "CKD", 1, 0),
+      levels = c(0, 1)
+    ),
+    sex = factor(
+      sex,
+      levels = c("Female", "Male")
+    ),
+    smoker_status = factor(
+      smoker_status,
+      levels = c(
+        "Current smoker",
+        "Ex-smoker",
+        "Never smoked"
+      )
+    ),
+    diabetes = factor(
+      diabetes,
+      levels = c(0, 1)
+    ),
+    across(
+      c(
+        low_alcohol_beer,
+        mid_strength_beer,
+        full_strength_beer,
+        white_wine,
+        red_wine,
+        low_alcohol_wine,
+        champagne_sparkling_wine,
+        spirits_rtd,
+        liqueurs,
+        spirits,
+        fortified_wine,
+        cider,
+        cocktails
+      ),
+      ~ factor(.x, levels = c(0, 1), labels = c(0, 1))
+    )
+  )
+```
+
+```{r}
+saveRDS(df_filter, "shared_df_filter.rds")
+```
+
+## Logistic regression
+
+```{r}
+ckd_data <- df_filter %>%
+  mutate(
+    beer = factor(
+      as.character(low_alcohol_beer) == "1" |
+      as.character(mid_strength_beer) == "1" |
+      as.character(full_strength_beer) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    ),
+
+    wine = factor(
+      as.character(white_wine) == "1" |
+      as.character(red_wine) == "1" |
+      as.character(low_alcohol_wine) == "1" |
+      as.character(champagne_sparkling_wine) == "1" |
+      as.character(fortified_wine) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    ),
+
+    spirits_liqueurs = factor(
+      as.character(spirits_rtd) == "1" |
+      as.character(liqueurs) == "1" |
+      as.character(spirits) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    )
+  ) %>%
+  select(
+    -low_alcohol_beer,
+    -mid_strength_beer,
+    -full_strength_beer,
+    -white_wine,
+    -red_wine,
+    -low_alcohol_wine,
+    -champagne_sparkling_wine,
+    -fortified_wine,
+    -spirits_rtd,
+    -liqueurs,
+    -spirits
+  )
+```
+
+```{r}
+model_int <- glm(ckd ~ age + alcohol_quantity * sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data, family = binomial)
+summary(model_int)
+```
+
+
+

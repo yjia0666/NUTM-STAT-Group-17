@@ -18,13 +18,15 @@ ckd_filter <- readRDS("shared_df_filter.rds")
 ```
 
 ```{r}
-table(ckd_filter$CKD)
+table(ckd_filter$AGE)
 ```
 
 ```{r}
 class(ckd_filter$AGE)
 ```
-
+```{r}
+table(ckd_filter$CKD)
+```
 
 ```{r}
 table(ckd_filter$AGE, useNA = "ifany") 
@@ -91,12 +93,6 @@ adj_alcohol_ckd <- adjustmentSets(
 adj_alcohol_ckd
 ```
 
-```{r}
-summary(ckd_filter$AGE)
-```
-
-
-
 ### Full model
 ```{r}
 # Using the original predictors, full model with interaction
@@ -109,44 +105,6 @@ summary(full_model)
 vif(full_model)
 ```
 
-
-```{r}
-# Do not run this
-# Combine(When alcohol types are numeric!)
-ckd_filter$Beer <- as.integer(
-  rowSums(ckd_filter[, c(
-    "Low_alcohol_beer",
-    "Mid_strength_beer",
-    "Full_strength_beer"
-  )], na.rm = TRUE) > 0
-)
-
-ckd_filter$Wine <- as.integer(
-  rowSums(ckd_filter[, c(
-    "White_wine",
-    "Red_wine",
-    "Low_alcohol_wine",
-    "Champagne_sparkling_wine",
-    "Fortified_wine"
-  )], na.rm = TRUE) > 0
-)
-
-ckd_filter$Spirits_Liqueurs <- as.integer(
-  rowSums(ckd_filter[, c(
-    "Spirits_RTD",
-    "Liqueurs",
-    "Spirits"
-  )], na.rm = TRUE) > 0
-)
-
-ckd_filter$Other <- as.integer(
-  rowSums(ckd_filter[, c(
-    "Cider",
-    "Cocktails"
-  )], na.rm = TRUE) > 0
-)
-
-```
 
 ```{r}
 ckd_filter$Beer <- factor(
@@ -372,6 +330,61 @@ Among males, Low risk was associated with higher CKD odds than Risky and High ri
 p: Assuming 2 groups have no differences, the probability of observing this result
 
 OR>1, odds of the previous group is higher -> higher probability of no CKD
+
+```{r}
+model_smoking_int <- glm(
+  CKD ~ smoker_status * SEX_factor + AGE,
+  data = ckd_filter,
+  family = binomial
+)
+summary(model_smoking_int)
+```
+
+```{r}
+emm <- emmeans(
+  model_smoking_int,
+  ~ smoker_status | SEX_factor
+)
+
+pairs(
+  emm,
+  type = "response",
+  infer = c(TRUE, TRUE)
+)
+```
+
+```{r}
+smoking_model_summary <- summary(model_smoking_int)$coefficients
+
+results_pretty <- data.frame(
+  Variable = rownames(smoking_model_summary),
+
+  OR = exp(smoking_model_summary[, "Estimate"]),
+
+  `95% CI` = paste0(
+    sprintf("%.2f", exp(smoking_model_summary[, "Estimate"] -
+                         1.96 * smoking_model_summary[, "Std. Error"])),
+    "-",
+    sprintf("%.2f", exp(smoking_model_summary[, "Estimate"] +
+                         1.96 * smoking_model_summary[, "Std. Error"]))
+  ),
+
+  SE = sprintf("%.3f", smoking_model_summary[, "Std. Error"]),
+
+  `P-value` = ifelse(
+    smoking_model_summary[, "Pr(>|z|)"] < 0.001,
+    "<0.001",
+    sprintf("%.3f", smoking_model_summary[, "Pr(>|z|)"])
+  ),
+
+  check.names = FALSE
+)
+
+results_pretty$OR <- sprintf("%.2f", results_pretty$OR)
+
+print(results_pretty, row.names = FALSE)
+```
+
 
 ## Model Selection
 interaction or no interaction
