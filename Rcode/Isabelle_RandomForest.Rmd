@@ -1,0 +1,619 @@
+---
+title: "Disciplinary Assignment"
+author: "540706002"
+output: 
+  html_document:
+    code_folding: hide
+
+---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+  }
+  h1, h2, h3 {
+    font-family: Georgia, serif;
+  }
+  code {
+    font-family: "Courier New", Courier, monospace;
+  }
+</style>
+
+```{r, message = FALSE, warning = FALSE}
+
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(tidyverse)
+library(randomForest)
+library(dplyr)
+library(ranger)
+library(pROC)
+library(ggplot2)
+library(pdp)
+library(MASS)
+library(gt)
+
+set.seed(123)
+
+ckd_filter <- readRDS("shared_df_filter.rds")
+```
+
+## Research Question
+
+### What is the association of alcohol consumption and CKD, and does sex modify this association? Smoking is a known risk factor for CKD, but does its effect differ between sexes?
+
+## How does Random Forest answer the research question?
+
+Random forest classification can determine CKD status, a categorical variable, via majority voting and random features of the original data. Although Random Forest does not explicitly determine the modifying effect of sex, prediction and variable importance can be determined. We can see how variation of CKD status, is explained by the alcohol variables like quantity, type or frequency, and sex. The Random Forest can only indirectly answer the research question, through the evaluation of variable importance and visual representations of a modifying effect via partial dependence plots. 
+
+Random Forest will not include smoking variables, and primarily focuses on the main question.
+
+## Assumptions 
+
+The assumption of the Random Forest method is that the prediction of the individual trees must have very low correlation from each other, and combining predictions from different trees improves accuracy.
+
+The training dataset should be representative of the true population. The training dataset is taken from the 2011-2012 Australian National Health Survey, and respondents from the same clusters may land in the testing and training sets. Even though the survey data is representative of the true population, it cannot fix sampling biases. The true population does not have an even split of healthy people and CKD, so our data also has an uneven distribution. A strictly representative training set does not allow the model to learn enough, so in the case of imbalanced classes, distributions may need to be altered. 
+
+There are 2,765 samples with Alcohol Consumption and CKD data, from the National Health Survey 2011-2012, which is sufficient for 9 input features (sex, Frequency of consuming 3 standard drinks a day, Age, Alcohol quantity in the last week, Alcohol type consumed in the last week - Beer, Wine, Spirits and Liqueurs, Cocktails, Cider). There is an assumption that recent behaviour in Alcohol quantity reflects the respondents' habitual intake of Alcohol, and that there are no recent life changes of sudden sobriety or escalation. The Frequency of consuming 3 standard drinks a day was assumed to reflect chronic exposure to Alcohol.
+
+
+## Using Random Forest: tuning parameters, variable examination
+
+
+```{r}
+#A categorical variable Alcohol type with multiple levels of different alcohol type was made into dummy variables where 1 indicates the consumption of that alcohol type. The types of Beer, Wine and Spirits/Liqueurs were further condensed together.
+
+#Combining Beer Together
+ckd_filter$Beer <- factor(
+  as.character(ckd_filter$Low_alcohol_beer) == "1" |
+  as.character(ckd_filter$Mid_strength_beer) == "1" |
+  as.character(ckd_filter$Full_strength_beer) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+#Combining Wine Together
+ckd_filter$Wine <- factor(
+  as.character(ckd_filter$White_wine) == "1" |
+  as.character(ckd_filter$Red_wine) == "1" |
+  as.character(ckd_filter$Low_alcohol_wine) == "1" |
+  as.character(ckd_filter$Champagne_sparkling_wine) == "1" |
+  as.character(ckd_filter$Fortified_wine) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+#Combining Spirits and Liqueurs Together
+ckd_filter$Spirits_Liqueurs <- factor(
+  as.character(ckd_filter$Spirits_RTD) == "1" |
+  as.character(ckd_filter$Liqueurs) == "1" |
+  as.character(ckd_filter$Spirits) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+ckd_filter <- ckd_filter %>%
+  dplyr::select(-SEX, -Alcohol_risk, -smoker_status, -daily_smoke, -Alcohol_risk_7day, -eGFR_range, -Low_alcohol_beer, -Mid_strength_beer, -Full_strength_beer, -White_wine, -Red_wine, -Low_alcohol_wine, -Champagne_sparkling_wine, -Fortified_wine, -Spirits_RTD, -Liqueurs, -Spirits) 
+
+```
+
+```{r}
+ckd_tab <- ckd_filter %>%
+  count(CKD) %>%
+  mutate(
+    Status = ifelse(CKD == "1", "CKD", "No CKD"),
+    CKD = ifelse(CKD == "1", "CKD", "No_CKD"),
+    Percent = round(100 * n / sum(n), 1),
+    CKD = NULL
+  ) 
+
+ckd_tab %>%
+  gt() %>%
+  tab_footnote(
+    footnote = "Proportions of Classes of CKD and Healthy Individuals") %>%
+  cols_move_to_start(columns = "Status") %>%
+  tab_header(title = "CKD status ") %>%
+  fmt_number(columns = Percent, decimals = 1, pattern = "{x}%")
+```
+### Resolving Class Imbalance 
+
+
+
+```{r}
+set.seed(123)
+
+# Data split
+ 
+idx   <- sample(nrow(ckd_filter), 0.7 * nrow(ckd_filter))
+train <- ckd_filter[idx, ]
+test  <- ckd_filter[-idx, ]
+saveRDS(list(train = train, test = test), "split.rds")   
+
+train$CKD <- factor(train$CKD, levels = c(0, 1), labels = c("No_CKD", "CKD"))
+test$CKD  <- factor(test$CKD,  levels = c(0, 1), labels = c("No_CKD", "CKD"))
+
+```
+
+
+In order to fix class imbalance and retain the trustworthiness of OOB error, RandomForest can draw balanced samples on each tree itself i.e. downsampling the majority class. This undersampling method avoids misleading and inflated accuracy unlike the class weights method.
+
+```{r, results = 'hide', message = FALSE}
+set.seed(123)
+
+# Need to fix class imbalance via balanced samples
+
+n_min <- sum(train$CKD == "CKD")
+
+rf_balanced <- randomForest(
+  CKD ~ ., data = train,
+  ntree = 500, importance = TRUE,
+  strata = train$CKD,
+  sampsize = c(n_min, n_min) # Down-sampling the majority class
+)
+
+rf_balanced   # the OOB error and class-specific errors are trustworthy here
+
+pred_class_balanced <- predict(rf_balanced, test)
+pred_prob_balanced  <- predict(rf_balanced, test, type = "prob")[, "CKD"]
+
+table(Predicted = pred_class_balanced, Actual = test$CKD)
+
+CM_balanced <- confusionMatrix(pred_class_balanced, test$CKD, positive = "CKD") # Confusion Matrix
+
+cm_df <- as.data.frame(CM_balanced$table)
+
+# Plotting Confusion Matrix with high aesthetics
+
+ggplot(data = cm_df, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white", lwd = 1, linetype = 1) +  # Creates clear tile borders
+  geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + # Large, bold numbers
+  scale_fill_gradient(low = "skyblue", high = "skyblue3") + # Sleek blue gradient theme
+  labs(
+    title = "Balanced Random Forest Performance",
+    caption = "AUC-ROC is more reliable than accuracy for downsampled Random Forests.",
+    subtitle = paste0("Overall Accuracy: ", round(CM_balanced$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_balanced$err.rate[nrow(rf_balanced$err.rate), "OOB"] * 100, 2), "%"),
+    x = "Actual Classes",
+    y = "Predicted Classes"
+  ) +
+  theme_minimal(base_size = 14) 
+
+roc_obj <- roc(test$CKD, pred_prob_balanced)
+auc_value_balanced <- auc(roc(test$CKD, pred_prob_balanced, levels = c("No_CKD", "CKD"), direction = "<"))  
+plot(roc_obj, main = paste("Area under Curve of the Balanced Random Forest is", round(auc_value_balanced, 3)))
+
+sens_value <- CM_balanced$byClass["Sensitivity"]
+
+Class <- c("No CKD", "CKD")
+Errors <- round(rf_balanced$confusion[, "class.error"], 3)
+
+class_errors <- data.frame(Class, Errors) %>% gt() %>%
+  cols_label(Class = "Status",
+             Errors = "Class Errors") %>%
+    tab_header(title = "CKD status ") 
+
+class_errors
+
+```
+
+
+### Hyperparametric tuning 
+
+Previously, when training the Random Forest model, it automatically deduces the optimal values for the model hyperparameters. However, after using random search to sample parameter combinations, another grid can be defined to deduce the best model hyperparameters. 
+
+```{r}
+set.seed(123)
+
+# Random Search for Hyperparameter tuning
+
+# Define a random search control
+
+ctrl_random <- trainControl(method = "cv", number = 5, search = "random")
+
+random_model <- train(
+  CKD ~ .,
+  data = train,
+  method = "ranger",
+  tuneLength = 10,   # Testing 10 random combinations from the hyperparameter space
+  trControl = ctrl_random
+)
+
+gt(random_model$bestTune) |> tab_header(title = md("Best Hyperparameters from **Random Search**")) |> cols_align(
+  align = "center")
+
+```
+Random Search finds that a minimum node size of 18 is the optimal value, typically suggesting the model currently overfits at lower values with the minimum node size as 1. To see if 18 is truly optimal, a focused GridSearch can be done to search around that range. 
+
+### Focused Grid Search - Accuracy
+
+
+```{r}
+set.seed(123)
+
+# Define a standard CV control 
+final_control <- trainControl(
+  method = "cv",
+  number = 5
+)
+
+preProcObj <- preProcess(train, method = c('center', 'scale')) #Prevents data leakage
+df_train <- predict(preProcObj, train)
+df_test <- predict(preProcObj, test)
+
+# Define a tight grid around the minimum node size of 18
+fine_tune_grid <- expand.grid(
+  mtry = 3, # Keeping other best random search parameters fixed
+  min.node.size = c(12, 14, 16, 18, 20, 22, 24, 26), 
+  splitrule = "gini" 
+)
+
+# Running the final grid search
+final_model <- train(
+  CKD ~ ., 
+  data = df_train,
+  method = "ranger", 
+  trControl = final_control,
+  tuneGrid = fine_tune_grid
+)
+
+```
+
+```{r}
+set.seed(123)
+
+final_model_table <- final_model$results #Extracting the results of the final grid search
+clean_table <- final_model_table %>% gt()
+clean_table |> tab_header(title = md("Focused Grid Search Results"))
+
+pred_class <- predict(final_model, df_test)
+
+CM_randomsearch <- confusionMatrix(pred_class, test$CKD, positive = "CKD") # Confusion Matrix
+cm_randomsearch <- as.data.frame(CM_randomsearch$table)
+
+# Plotting Confusion Matrix with high aesthetics
+
+ggplot(data = cm_randomsearch, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white", lwd = 1, linetype = 1) +  
+  geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + 
+  scale_fill_gradient(low = "steelblue1", high = "steelblue3") + 
+  labs(
+    title = "Focused Grid Search Random Forest Performance",
+    subtitle = paste0("Overall Accuracy: ", round(CM_randomsearch$overall['Accuracy'] * 100, 2), "%"),
+    x = "Actual Classes",
+    y = "Predicted Classes"
+  ) +
+  theme_minimal(base_size = 14) 
+
+```
+
+By testing minimum node sizes around 18 at a constant mtry, an almost flat accuracy of 0.88 may indicate that accuracy is the wrong metric to look at for imbalanced data. From the confusion matrix, the model is mostly predicting No CKD, so tuning hyper parameters based of  optimising sensitivity would be better. 
+
+### Focused Grid Search - Sensitivity
+
+
+```{r}
+set.seed(123)
+
+ctrl <- trainControl(
+  method = "cv", number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,   # ROC, Sens, Spec
+  sampling = "down"                    # balance within each CV fold
+)
+
+fit <- train(
+  CKD ~ ., data = train, method = "ranger",
+  metric = "ROC", trControl = ctrl,
+  tuneGrid = expand.grid(mtry = c(3, 4, 5, 6, 7, 8),
+                         min.node.size = c(1, 12, 13, 14, 15, 16, 17, 18),
+                         splitrule = "gini")
+)
+
+#Specificity is the recall for CKD sensitivity, as caret treats the first outcome level as the positive class and our target factor levels was ordered [No CKD, CKD]
+
+fit$results %>% 
+  arrange(desc(Spec)) %>%   
+  slice_head(n = 5) %>% # Only the top five Sensitivities are shown
+  gt() %>% 
+  cols_move_to_start(columns = "Spec") %>%
+  cols_move_to_start(columns = "min.node.size") %>%
+  cols_move_to_start(columns = "mtry") %>%
+  cols_hide(columns = "splitrule") %>%
+  cols_label(Spec = "Sensitivity", Sens = "Specificity") %>%
+  tab_header(title = "Combination of Hyper parameters which leads to highest Sensitivity")
+
+chosen <- fit$results %>% filter(mtry == 5, min.node.size == 12)   # The final combination
+
+names <- c("Initial balanced RF", "Final RF")
+
+sensitivity <- c(sens_value, chosen$Sens)
+
+sens_table <- data.frame(Name = names, 
+                         Sensitivity = sensitivity) %>% gt()
+
+```
+
+The best hyper-parametric combination appears to be mtry of 3 with a min.node.size of 12, which gave the highest sensitivity of 0.665. The ROC 0.699 means there is acceptable discrimination.
+
+## Adjusted Random Forest 
+
+```{r, message = 'false'}
+set.seed(123)
+
+rf_adjusted <- randomForest(
+  CKD ~ ., data = train,
+  ntree = 500, importance = TRUE,
+  strata = train$CKD,
+  mtry = 3,
+  nodesize = 12,
+  sampsize = c(n_min, n_min)
+) # The OOB error and class-specific errors are trustworthy here
+
+pred_class <- predict(rf_adjusted, test)
+pred_prob  <- predict(rf_adjusted, test, type = "prob")[, "CKD"]
+
+CM_adjusted <- confusionMatrix(pred_class, test$CKD, positive = "CKD") # Confusion Matrix
+cm_adjusted <- as.data.frame(CM_adjusted$table)
+
+# Plotting Confusion Matrix with high aesthetics
+
+ggplot(data = cm_adjusted, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white", lwd = 1, linetype = 1) +  
+  geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + 
+  scale_fill_gradient(low = "aquamarine1", high = "aquamarine3") + 
+  labs(
+    title = "Random Forest Performance of Adjusted Random Forest",
+    subtitle = paste0("Overall Accuracy: ", round(CM_adjusted$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_balanced$err.rate[nrow(rf_balanced$err.rate), "OOB"] * 100, 2), "%"),
+    x = "Actual Classes",
+    y = "Predicted Classes"
+  ) +
+  theme_minimal(base_size = 14) 
+
+
+Class <- c("No CKD", "CKD")
+Errors <- round(rf_adjusted$confusion[, "class.error"], 3)
+class_errors <- data.frame(Class, Errors) %>% gt() %>%
+  cols_label(Class = "Status",
+             Errors = "Class Errors") %>%
+    tab_header(title = "CKD status ") 
+
+class_errors
+```
+
+```{r, message = 'false'}
+roc_obj <- roc(test$CKD, pred_prob)
+auc_value_adjusted <- auc(roc(test$CKD, pred_prob, levels = c("No_CKD", "CKD"), direction = "<"))  
+plot(roc_obj, main = paste("Area under Curve of the Adjusted Random Forest is", round(auc_value_adjusted, 3)), col = "aquamarine4")
+
+
+```
+
+### Assessing Performance further
+
+The tuned complex random forest should be able to beat the accuracy score of a single decision tree. The use of majority voting to classify CKD should cancel out noise and outliers. The rpart model uses the exact same undersampled training set, to make the comparison fair.
+
+```{r, message = 'false'}
+set.seed(123)
+
+tree <- rpart(CKD ~ ., data = train, method = "class",
+              parms = list(prior = c(0.5, 0.5)),
+              control = rpart.control(cp = 0.005, minbucket = 30))
+
+rpart.plot(tree, type = 2, extra = 104, main = "Chronic Kidney Disease Data")
+
+prediction_prob <- predict(tree, test, type = "prob")
+CKD_prob <- prediction_prob[, "CKD"]
+
+roc_obj <- roc(test$CKD, CKD_prob)
+auc_value <- auc(roc_obj)
+
+plot(roc_obj, main = paste("Area under Curve of Decision Tree is", round(auc_value, 3)))
+
+```
+
+The Random Forest Model outperforms the single decision tree, wherein yielding a better AUC of 0.74 compared to 0.712.
+
+
+## Does omitting sex harm prediction accuracy: Random Forest without sex
+
+The comparison of a complete Random Forest Model to a Random Forest model without sex, can provide an exact quantification of sex in prediction performance and variable importance.
+
+```{r, message = 'false'}
+
+# No-sex model, same people as the with-sex model
+ckd_filter_no_sex <- ckd_filter %>%
+  dplyr::select(-SEX_factor) 
+
+idx   <- sample(nrow(ckd_filter_no_sex), 0.7 * nrow(ckd_filter_no_sex))
+train_ns <- train %>% dplyr::select(-SEX_factor)
+test_ns  <- test  %>% dplyr::select(-SEX_factor)
+
+# Need to fix class imbalance via balanced samples
+
+set.seed(123)
+rf_nosex <- randomForest(
+  CKD ~ ., data = train_ns,
+  ntree = 500, importance = TRUE,
+  strata = train_ns$CKD,
+  mtry = 3,
+  nodesize = 12,
+  sampsize = c(n_min, n_min) # Down-sampling the majority class
+)
+
+```
+
+```{r, message = 'false'}
+set.seed(123)
+
+pred_class_nosex <- predict(rf_nosex, test_ns)
+pred_prob_nosex  <- predict(rf_nosex, test_ns, type = "prob")[, 2]
+
+CM_nosex <- confusionMatrix(pred_class_nosex, test_ns$CKD, positive = "CKD") # Confusion Matrix
+
+cm_nosex <- as.data.frame(CM_nosex$table)
+
+# Plotting Confusion Matrix with high aesthetics
+
+ggplot(data = cm_nosex, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white", lwd = 1, linetype = 1) +  # Creates clear tile borders
+  geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + # Large, bold numbers
+  scale_fill_gradient(low = "darkseagreen2", high = "darkseagreen3") + # Sleek blue gradient theme
+  labs(
+    title = "Random Forest without 'Sex' Performance",
+    subtitle = paste0("Overall Accuracy: ", round(CM_nosex$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_nosex$err.rate[nrow(rf_nosex$err.rate), "OOB"] * 100, 2), "%"), 
+    x = "Actual Classes",
+    y = "Predicted Classes"
+  ) +
+  theme_minimal(base_size = 14) 
+
+
+Class <- c("No CKD", "CKD")
+Errors <- rf_nosex$confusion[, "class.error"]
+class_errors <- data.frame(Class, Errors) %>% gt() %>%
+  cols_label(Class = "Status",
+             Errors = "Class Errors") %>%
+    tab_header(title = "CKD status ") 
+
+class_errors
+
+roc_obj_nosex <- (roc(test_ns$CKD, pred_prob_nosex, levels = c("No_CKD", "CKD"), direction = "<"))  
+auc_valuenosex <- auc(roc_obj_nosex)
+
+plot(roc_obj_nosex, main = paste("Area under Curve of Random Forest without 'sex' is", round(auc_valuenosex, 3)), col="darkseagreen3")
+
+sens <- sensitivity(pred_class_nosex, test_ns$CKD) #Sensitivity value of no sex RF
+
+names <- c("RF without sex", "Final RF")
+
+sensitivity <- c(sens, CM_nosex$byClass["Sensitivity"])
+
+sensitivity_table <- data.frame(Name = names, Sensitivity = sensitivity) %>% gt()
+
+
+```
+```{r}
+
+roc_full <- roc(test$CKD, pred_prob, levels = c("No_CKD","CKD"), direction = "<")
+
+roc_ns   <- roc(test_ns$CKD, pred_prob_nosex, levels = c("No_CKD","CKD"), direction = "<")
+
+roc.test(roc_full, roc_ns)   # DeLong test for paired ROC curves
+
+```
+
+Removing sex from the model does not reduce discrimination, the AUC was 0.740 with sex and 0.743 without (difference -0.003, 95% CI -0.018 to 0.012; DeLong p = 0.69). A non-significant test does not prove there's no interaction effect between sex and alcohol. A prediction based test is not a formal interaction test, sex could matter for the alcohol-CKD association without improving AUC, because AUC is dominated by age. De-Long's test can only capture the test-set sampling error, ignoring the randomness of the Forest and the seed. 
+
+
+## Partial-dependence plots of Alcohol Quantity, conditioned on sex.
+
+Partial-dependence plots can show how predicted CKD probability changes across Alcohol Quantity, and stratification allows separate marginalisation over female and male empirical distributions of all other covariates. If female and male lines have different slopes, there is a visual representation of a modifying effect of sex. If there is a baseline difference between female and male lines, that shows the marginal effect of sex.
+
+
+```{r, message = FALSE}
+set.seed(123)
+
+pd <- partial(rf_adjusted, pred.var = c("alcohol_quantity", "SEX_factor"),
+              which.class = 2, prob = TRUE, train = train,
+              grid.resolution = 20)
+
+ggplot(pd, aes(alcohol_quantity, yhat, colour = SEX_factor)) +
+  geom_smooth(se = FALSE, span = 0.6) +
+  geom_rug(data = train, aes(x = alcohol_quantity), inherit.aes = FALSE, alpha = 0.1) +
+  labs(x = "Alcohol quantity in last week", y = "Predicted probability of CKD",
+       colour = "Sex") +
+  theme_minimal()
+
+```
+
+
+
+The PDP shows non-parallel curves, wherein the male slope is about five times the female slope over 0 to 7 drinks. This indicates effect modification, with a stronger alcohol association in males. There is more than just a marginal effect of sex, because the gap between males and females grows with alcohol quantity. PDP is descriptive, not a formal hypothesis test and has no confidence band, so there is no certainty that this visual difference is not just noise.
+
+Males: predicted CKD risk climbs from about 0.365 at zero drinks to about 0.465 at 7 to 8 drinks, then stays roughly flat at 0.455 to 0.467 out to 19. That’s an increase of about 0.10.
+Females: risk is about 0.324 at zero, dips slightly to 0.320 at 2 drinks, rises to about 0.342 by 8, and slightly increases to 0.345 at 19. The total change is about 0.02, which is close to flat.
+Gap between sexes: about 0.04 at zero drinks, then widens to about 0.12 from roughly 7 drinks onward, and staying there.
+
+Association of alcohol and CKD: in the Random Forest, higher alcohol quantity goes with higher predicted CKD, mainly seen in males and  between 0 and about 7 drinks. Females have a negligible association, although this only informs us of what the model learnt. Ultimately, PDP cannot separate alcohol from age, which is the dominant variable.
+
+
+
+### Global Importance of sex in Random Forest
+
+```{r}
+set.seed(123)
+
+# Extract importance values and visualise; Shows what variables contributed most to the random forest
+
+imp_data <- as.data.frame((randomForest::importance(rf_adjusted))) 
+
+rownames(imp_data)[rownames(imp_data) == "AGE"] <- "Age"
+rownames(imp_data)[rownames(imp_data) == "alcohol_quantity" ] <- "Alcohol Quantity"
+rownames(imp_data)[rownames(imp_data) == "SEX_factor" ] <- "Sex"
+rownames(imp_data)[rownames(imp_data) == "Red_wine" ] <- "Red Wine"
+rownames(imp_data)[rownames(imp_data) == "White_wine" ] <- "White Wine"
+rownames(imp_data)[rownames(imp_data) == "Full_strength_beer"] <- "Full Strength Beer"
+rownames(imp_data)[rownames(imp_data) == "Alcohol_risk_7day"] <- "7 day Alcohol Risk"
+rownames(imp_data)[rownames(imp_data) == "Champagne_sparkling_wine"] <- "Champagne/Sparkling Wine"
+rownames(imp_data)[rownames(imp_data) == "Mid_strength_beer"] <- "Mid Strength Beer"
+rownames(imp_data)[rownames(imp_data) == "Spirits_RTD"] <- "Ready to Drink Spirits"
+rownames(imp_data)[rownames(imp_data) == "Low_alcohol_beer"] <- "Low Alcohol Beer"
+rownames(imp_data)[rownames(imp_data) == "Fortified_wine"] <- "Fortified Wine"
+rownames(imp_data)[rownames(imp_data) == "Low_alcohol_wine"] <- "Low Alcohol wine"
+rownames(imp_data)[rownames(imp_data) == "Spirits_Liqueurs"] <- "Spirits and Liqueurs"
+rownames(imp_data)[rownames(imp_data) == "ALC_freq_3"] <- "Frequency of alcohol consumption"
+
+imp_data$Variable <- rownames(imp_data)
+
+
+# Display results in table
+
+imp_data %>% 
+  arrange(desc(MeanDecreaseAccuracy)) %>%
+  gt() %>% 
+  cols_move_to_start(columns = "Variable") %>%
+  cols_label(
+    No_CKD = "No CKD"
+  )
+
+# Pivot to long format for easier ggplot grouping
+imp_long <- imp_data %>%
+  rename(MDA = MeanDecreaseAccuracy, Gini = MeanDecreaseGini) %>%
+  pivot_longer(cols = c(MDA, Gini), names_to = "Metric", values_to = "Importance")
+
+# Create a faceted horizontal dot plot
+ggplot(imp_long, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_segment(aes(xend = Variable, yend = 0), color = "gray70", linewidth = 0.6) +
+  geom_point(color = "#2c3e50", size = 3) +
+  facet_wrap(~Metric, scales = "free_x") +   
+  coord_flip() +                             # Flips to horizontal for readable text labels
+  labs(
+    title = "Random Forest Variable Importance",
+    x = NULL,
+    y = "Importance Metric Score"
+  )  +
+  theme(strip.background = element_rect(fill = "dodgerblue3", colour = "white"),
+    strip.text = element_text(face = "bold", size = 12),
+    panel.spacing = unit(2, "lines")
+  )
+
+
+```
+
+Mean Decrease Accuracy (MDA) scores indicate how much the random forest relies on that feature to maintain OOB accuracy. MDA scores were highest for Age, Alcohol Quantity, Alcohol Frequency and Cider. Shuffling the age of survey individuals significantly influences the classification of CKD, which aligns with CKD being a chronic disease and how risk scales with age. The negative scores for Sex and Cocktails suggest that shuffling surprisingly improves accuracy, indicating a problem of overfitting or noise. Permuting Sex does not harm accuracy, even though that breaks any sex-alcohol interaction effect the Random Forest learns.
+
+Mean Decrease in Gini Importance scores were highest for Age, Alcohol Quantity, Frequency of Alcohol Consumption and Sex. These features were typically used at the top of the trees, whereas features like Cocktails and Cider added little value to the tree splits. All the alcohol types do not decrease the heterogeneity of the nodes that much, although Gini Importance Scores are skewed towards categorical features with more levels. 
+
+Using both metrics, Alcohol and Age appears to be more important than sex in the Random Forest's prediction of CKD. 
+
+
+
+
+
+## Conclusion
+
+Alcohol Quantity and Alcohol Frequency contribute to CKD prediction in the Random Forest model. Random Forest does not formally test sex interactions with alcohol, although it can indicate whether sex is predictive and whether alcohol's effect looks different in females and males. According to the PDPs of the final Random Forest model, there were suggestions that sex has a modifying effect - the gap between sexes widen from 7 standards onward. However, the MDA scores indicate that permuting sex doesn't affect accuracy so sex may add little insight beyond what Age already tells the model.
+
+Alcohol variables and sex contain some predictive information about CKD, but not strong information. The AUC of 0.74 means the Random Forest can modestly classify CKD, but is far from a diagnostic tool. Additionally since age has the highest MDA score, the contribution of alcohol consumption to CKD classification could be smaller than what AUC suggests. 
+
+For understanding how sex and alcohol are related, logistic regression would be better as a forest does not formally test interaction. Using undersampling to balance the dataset can still hurt model performance, as the subset of healthy people will now dictate the decision boundaries more, leading to higher variance and instability.

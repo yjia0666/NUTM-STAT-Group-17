@@ -17,7 +17,7 @@ df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
 
 df <- df1 %>%
-  select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B, SMKAGEDB, ALCSTR01, AL2K7DAY, ALCF3, AGEB) %>%
+  dplyr::select(ABSLID, ABSPID, SEX, SMKSTAT, SMOKEQ8B, SMKAGEDB, ALCSTR01, AL2K7DAY, ALCF3, AGEB) %>%
   filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
   left_join(
     df2 %>%
@@ -41,9 +41,16 @@ df %>%
 ```
 
 
+
 ```{r}
 
 ckd_data <- df %>%
+  mutate(
+    AGEDIABC = case_when(
+      AGEDIABC %in% 1:5 ~ "Diabetes",
+      AGEDIABC %in% c(0, 9) ~ "Healthy"
+    )
+  ),
   mutate(
     AGE = case_when(
       AGEB %in% 1:4 ~ NA_real_,
@@ -168,12 +175,12 @@ ckd_data <- df %>%
   ),
   
   eGFR_range = case_when(
-    EGFRRESB == 1 ~ "90+",
+    EGFRRESB == 1 ~ "90-120",
     EGFRRESB == 2 ~ "75-89",
     EGFRRESB == 3 ~ "60-74",
     EGFRRESB == 4 ~ "45-59",
     EGFRRESB == 5 ~ "30-44",
-    EGFRRESB == 6 ~ "<30",
+    EGFRRESB == 6 ~ "0-30",
     EGFRRESB %in% c(7,8) ~ NA_character_,
   )
   )

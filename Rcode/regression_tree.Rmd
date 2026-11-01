@@ -3,6 +3,8 @@ title: "random_forest"
 output: html_document
 ---
 
+** Question: What is the association of alcohol consumption and CKD, and does sex modify this association? Smoking is a known risk factor for CKD, but does sex modify this as well? **
+
 ```{r}
 
 library(caret)
@@ -15,25 +17,58 @@ library(ranger)
 library(pROC)
 library(ggplot2)
 library(pdp)
+library(MASS)
 
 set.seed(123)
 
-df_filter <- readRDS("shared_df_filter.rds")
+ckd_filter <- readRDS("shared_df_filter.rds")
 
+ckd_filter$Beer <- factor(
+  as.character(ckd_filter$Low_alcohol_beer) == "1" |
+  as.character(ckd_filter$Mid_strength_beer) == "1" |
+  as.character(ckd_filter$Full_strength_beer) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+ckd_filter$Wine <- factor(
+  as.character(ckd_filter$White_wine) == "1" |
+  as.character(ckd_filter$Red_wine) == "1" |
+  as.character(ckd_filter$Low_alcohol_wine) == "1" |
+  as.character(ckd_filter$Champagne_sparkling_wine) == "1" |
+  as.character(ckd_filter$Fortified_wine) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+ckd_filter$Spirits_Liqueurs <- factor(
+  as.character(ckd_filter$Spirits_RTD) == "1" |
+  as.character(ckd_filter$Liqueurs) == "1" |
+  as.character(ckd_filter$Spirits) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
+
+ckd_filter$Other <- factor(
+  as.character(ckd_filter$Cider) == "1" |
+  as.character(ckd_filter$Cocktails) == "1",
+  levels = c(FALSE, TRUE),
+  labels = c("0", "1")
+)
 
 bev_cols <- c("Low_alcohol_beer","Mid_strength_beer","Full_strength_beer",
               "White_wine","Red_wine","Low_alcohol_wine",
               "Champagne_sparkling_wine","Spirits_RTD","Liqueurs",
               "Spirits","Fortified_wine","Cider","Cocktails")
 
-rf_data <- df_filter %>%
-  select(-SEX, -Alcohol_risk, -ALC_freq_3) 
+ckd_filter <- ckd_filter %>%
+  dplyr::select(-SEX, -Alcohol_risk, -smoker_status, -daily_smoke, -Alcohol_risk_7day) 
 
 table(train$CKD) / nrow(train)   # check class imbalance
 
 #Need to fix class imbalance
 
-idx   <- sample(nrow(rf_data), 0.7 * nrow(rf_data))
+idx   <- sample(nrow(ckd_filter), 0.7 * nrow(ckd_filter))
 train <- rf_data[idx, ]
 test  <- rf_data[-idx, ]
 
@@ -69,10 +104,9 @@ tree <- rpart(CKD ~ ., data = train_up, method = "class",
 
 ```
 
-```{r}
 mda_scores <- importance(rf, type = 1, scale = FALSE)
 
-```
+
 
 Predicted CKD risk across alcohol quantity levels, were viewed separately by sex. A 2-way partial dependence plot of alcohol quantity and sex was mapped simultaneously against the variable CKD.
 
@@ -84,6 +118,15 @@ autoplot(pd, contour = TRUE) +
   labs(title = "2D Partial Dependence Plot for Random Forest",
        x = "Sex",
        y = "Alcohol quantity in last week",
+       fill = "Partial\nDependence") +
+  theme_minimal()
+
+pd <- partial(rf, pred.var = c("SEX_factor", "Alcohol_risk_7day"), grid.resolution = 40, chull = TRUE)
+
+autoplot(pd, contour = TRUE) +
+  labs(title = "2D Partial Dependence Plot for Random Forest",
+       x = "Sex",
+       y = "7-day Alcohol risk ",
        fill = "Partial\nDependence") +
   theme_minimal()
 ```
@@ -115,5 +158,78 @@ varImpPlot(rf) #Shows what variables contributed most to the random forest
 #Vote matrix
 rf$votes
 
+```
+```{r}
+
+# 1. Extract importance values
+imp_data <- as.data.frame((randomForest::importance(rf))) 
+
+rownames(imp_data)[rownames(imp_data) == "AGE"] <- "Age"
+rownames(imp_data)[rownames(imp_data) == "alcohol_quantity" ] <- "Alcohol Quantity"
+rownames(imp_data)[rownames(imp_data) == "SEX_factor" ] <- "Sex"
+rownames(imp_data)[rownames(imp_data) == "Red_wine" ] <- "Red Wine"
+rownames(imp_data)[rownames(imp_data) == "White_wine" ] <- "White Wine"
+rownames(imp_data)[rownames(imp_data) == "Full_strength_beer"] <- "Full Strength Beer"
+rownames(imp_data)[rownames(imp_data) == "Alcohol_risk_7day"] <- "7 day Alcohol Risk"
+rownames(imp_data)[rownames(imp_data) == "Champagne_sparkling_wine"] <- "Champagne/Sparkling Wine"
+rownames(imp_data)[rownames(imp_data) == "Mid_strength_beer"] <- "Mid Strength Beer"
+rownames(imp_data)[rownames(imp_data) == "Spirits_RTD"] <- "Ready to Drink Spirits"
+rownames(imp_data)[rownames(imp_data) == "Low_alcohol_beer"] <- "Low Alcohol Beer"
+rownames(imp_data)[rownames(imp_data) == "Fortified_wine"] <- "Fortified Wine"
+rownames(imp_data)[rownames(imp_data) == "Low_alcohol_wine"] <- "Low alcohol wine"
+
+
+imp_data$Variable <- rownames(imp_data)
+
+#rownames(imp_data) <- c("", "", "", , , , , ,    )
+
+
+
+# 2. Pivot to long format for easier ggplot grouping
+imp_long <- imp_data %>%
+  rename(MDA = MeanDecreaseAccuracy, Gini = MeanDecreaseGini) %>%
+  pivot_longer(cols = c(MDA, Gini), names_to = "Metric", values_to = "Importance")
+
+# 3. Create a faceted horizontal lollipop/dot plot
+ggplot(imp_long, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_segment(aes(xend = Variable, yend = 0), color = "gray70", linewidth = 0.6) +
+  geom_point(color = "#2c3e50", size = 3) +
+  facet_wrap(~Metric, scales = "free_x") +   # Gives each statistic its own dynamic axis
+  coord_flip() +                             # Flips to horizontal for readable text labels
+  labs(
+    title = "Random Forest Variable Importance",
+    x = NULL,
+    y = "Importance Metric Score"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 12),
+    panel.spacing = unit(2, "lines")
+  )
+
+```
+
+**Ordinal Regression on eGFR ranges**
+
+The outcome variable 
+```{r}
+m <- polr(eGFR_range ~ AGE + alcohol_quantity * SEX_factor + ALC_freq_3 + Beer + Wine + Spirits_Liqueurs + Cider + Cocktails, data = ckd_filter, Hess=TRUE)
+
+```
+
+```{r}
+summary(m)
+(ctable <- coef(summary(m)))
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+(ctable <- cbind(ctable, "p value" = p))
+(ci <- confint(m))
+confint.default(m)
+```
+For AGE, we would say that for a one unit increase in AGE (i.e., going from 0 to 1), we expect a
+9.8e-02 decrease in the expected value of EGFR on the log odds scale, given all of the other variables in
+the model are held constant.
+
+```{r}
+exp(cbind(OR = coef(m), ci))
 ```
 
