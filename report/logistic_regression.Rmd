@@ -1,0 +1,436 @@
+---
+title: "logistic regression"
+author: "yjia0666"
+output: 
+  html_document:
+    number_sections: true
+bibliography: references.bib
+date: "2026-10-18"
+nocite: '@*'
+---
+```{r,message=FALSE, warning=FALSE}
+library(dplyr)
+library(emmeans)
+library(car)
+library(dagitty)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+```
+
+```{r}
+df_filter <- readRDS("shared_df_filter.rds")
+```
+
+```{r}
+ckd_data <- df_filter %>%
+  mutate(
+    beer = factor(
+      as.character(low_alcohol_beer) == "1" |
+      as.character(mid_strength_beer) == "1" |
+      as.character(full_strength_beer) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    ),
+
+    wine = factor(
+      as.character(white_wine) == "1" |
+      as.character(red_wine) == "1" |
+      as.character(low_alcohol_wine) == "1" |
+      as.character(champagne_sparkling_wine) == "1" |
+      as.character(fortified_wine) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    ),
+
+    spirits_liqueurs = factor(
+      as.character(spirits_rtd) == "1" |
+      as.character(liqueurs) == "1" |
+      as.character(spirits) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    )
+  ) %>%
+  select(
+    -low_alcohol_beer,
+    -mid_strength_beer,
+    -full_strength_beer,
+    -white_wine,
+    -red_wine,
+    -low_alcohol_wine,
+    -champagne_sparkling_wine,
+    -fortified_wine,
+    -spirits_rtd,
+    -liqueurs,
+    -spirits
+  )
+```
+
+# Data Preparation
+```{r,echo=FALSE}
+variable_overview <- tibble::tibble(
+  Variable = c(
+    "CKD",
+    "Alcohol_quantity",
+    "Alcohol_frequency",
+    "Beer",
+    "Wine",
+    "Spirits_Liqueurs",
+    "Cider",
+    "Cocktails",
+    "Sex",
+    "Age"
+  ),
+  Description = c(
+    "Chronic kidney disease status (0 = No, 1 = Yes)",
+    "Number of standard drinks consumed in the last week",
+    "Number of days per week consuming three or more drinks in a day over the past 12 months",
+    "Whether beer was consumed in the last week (0 = No, 1 = Yes)",
+    "Whether wine was consumed in the last week (0 = No, 1 = Yes)",
+    "Whether Spirits or liqueurs were consumed in the last week (0 = No, 1 = Yes)",
+    "Whether cider was consumed in the last week (0 = No, 1 = Yes)",
+    "Whether cocktail was consumed in the last week (0 = No, 1 = Yes)",
+    "Participant sex",
+    "Participant age"
+  ),
+
+  Type = c(
+    "Binary categorical",
+    "Numeric",
+    "Numeric",
+    "Binary categorical",
+    "Binary categorical",
+    "Binary categorical",
+    "Binary categorical",
+    "Binary categorical",
+    "Binary categorical",
+    "Numeric"
+  ),
+
+  Role = c(
+    "Outcome",
+    "Main exposure",
+    "Additional alcohol-related predictor",
+    "Additional alcohol-related predictor",
+    "Additional alcohol-related predictor",
+    "Additional alcohol-related predictor",
+    "Additional alcohol-related predictor",
+    "Additional alcohol-related predictor",
+    "Effect modifier",
+    "Potential confounder"
+  )
+)
+
+variable_overview |>
+  kable(
+    caption = "Overview of Study Variables",
+    align = "l",
+    booktabs = TRUE
+  ) |>
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "left"
+  )
+```
+
+
+# Logistic Regression
+## Model Specification
+```{r}
+model_int <- glm(ckd ~ age + alcohol_quantity * sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data, family = binomial)
+```
+
+$$
+\begin{aligned}
+\log\left(\frac{P(CKD_i=1)}{1-(P(CKD_i=1))}\right)
+={}& \beta_0 + \beta_1 \mathrm{Age}_i + \beta_2 \mathrm{AlcoholQuantity}_i + \beta_3 \mathrm{Sex}_i \\
+&+ \beta_4 (\mathrm{AlcoholQuantity}_i \times \mathrm{Sex}_i) \\
+&+ \beta_5 \mathrm{AlcoholFrequency}_i + \beta_6 \mathrm{Diabetes}_i \\
+&+ \beta_7 \mathrm{Beer}_i + \beta_8 \mathrm{Wine}_i \\
+&+ \beta_9 \mathrm{SpiritsLiqueurs}_i + \beta_{10} \mathrm{Cider}_i+ \beta_{11} \mathrm{Cocktails}_i
+\end{aligned}
+$$
+
+## Assumptions and Diagnostics
+### Linearity in the logit
+
+```{r,echo=FALSE}
+plot(
+  ckd_data$alcohol_quantity,
+  model_int$linear.predictors,
+  main = "Alcohol Quantity and the Linear Predictor of CKD",
+  xlab = "Alcohol quantity",
+  ylab = "Linear predictor (logit)",
+  pch = 16,
+  col = "gray50",
+  cex = 0.5
+)
+
+lines(
+  lowess(
+    ckd_data$alcohol_quantity,
+    model_int$linear.predictors
+  ),
+  col = "steelblue",
+  lwd = 2
+)
+```
+
+```{r, echo=FALSE}
+plot(
+  ckd_data$age,
+  model_int$linear.predictors,
+  main = "Age and the Linear Predictor of CKD",
+  xlab = "Age",
+  ylab = "Linear predictor (logit)",
+  pch = 16,
+  col = "gray50",
+  cex = 0.5
+)
+
+lines(
+  lowess(
+    ckd_data$age,
+    model_int$linear.predictors
+  ),
+  col = "steelblue",
+  lwd = 2
+)
+```
+
+```{r,echo=FALSE}
+plot(
+  ckd_data$alcohol_frequency,
+  model_int$linear.predictors,
+  main = "Alcohol Frequency and the Linear Predictor of CKD",
+  xlab = "Alcohol frequency",
+  ylab = "Linear predictor (logit)",
+  pch = 16,
+  col = "gray50",
+  cex = 0.5
+)
+
+lines(
+  lowess(
+    ckd_data$alcohol_frequency,
+    model_int$linear.predictors
+  ),
+  col = "steelblue",
+  lwd = 2
+)
+```
+
+
+### Multicollinearity
+```{r,message=FALSE,warning=FALSE,echo=FALSE}
+round(vif(model_int), 2)
+```
+
+
+```{r}
+model_no_int <- glm(ckd ~ age + alcohol_quantity + sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data, family = binomial)
+round(vif(model_no_int), 2)
+```
+
+
+### Influential Observations
+Influential observations were assessed using Cook's distance.  
+
+```{r,echo=FALSE}
+cd <- cooks.distance(model_int)
+```
+
+```{r,echo=FALSE}
+top7 <- order(cd, decreasing = TRUE)[1:5]
+
+plot(
+  1:length(cd), cd,
+  type = "h",
+  col = "gray50",
+  lwd = 1.2,
+  xlab = "Observation",
+  ylab = "Cook's distance",
+  main = "Cook's Distance Plot",
+  ylim = c(0, max(cd) * 1.15)
+)
+
+points(
+  top5,
+  cd[top5],
+  col = "steelblue",
+  pch = 16,
+  cex = 1
+)
+
+text(
+  top5,
+  cd[top5],
+  labels = top5,
+  pos = 3,
+  col = "steelblue",
+  cex = 0.8
+)
+```
+
+```{r,echo=FALSE}
+top8_cd <- sort(cd, decreasing = TRUE)[1:8]
+round(top8_cd, 4)
+```
+Influential observations were assessed using Cook's distance. Several observations had relatively higher Cook's distances, the maximum value was 0.103. 
+
+The observations with higher Cook's distances were examined in more detail.
+```{r,echo=FALSE}
+top7 <- order(cd, decreasing = TRUE)[1:7]
+
+data.frame(
+  Observation = top7,
+  Cooks_Distance = round(cd[top7], 4),
+  ckd_data[top7, c(
+    "ckd",
+    "age",
+    "alcohol_quantity",
+    "sex",
+    "alcohol_frequency",
+    "diabetes",
+    "beer",
+    "wine",
+    "spirits_liqueurs",
+    "cider",
+    "cocktails"
+  )]
+)
+```
+
+After reviewing these observations individually, no data errors were identified, and all observations were retained in the analysis.
+
+## Results and Interpretation
+```{r, echo=FALSE}
+model_summary <- summary(model_int)$coefficients
+
+results_pretty <- data.frame(
+  Variable = rownames(model_summary),
+
+  OR = exp(model_summary[, "Estimate"]),
+
+  `95% CI` = paste0(
+    sprintf("%.2f", exp(model_summary[, "Estimate"] -
+                         1.96 * model_summary[, "Std. Error"])),
+    "–",
+    sprintf("%.2f", exp(model_summary[, "Estimate"] +
+                         1.96 * model_summary[, "Std. Error"]))
+  ),
+
+  SE = sprintf("%.3f", model_summary[, "Std. Error"]),
+
+  `P-value` = ifelse(
+    model_summary[, "Pr(>|z|)"] < 0.001,
+    "<0.001",
+    sprintf("%.3f", model_summary[, "Pr(>|z|)"])
+  ),
+
+  check.names = FALSE
+)
+
+results_pretty$OR <- sprintf("%.2f", results_pretty$OR)
+
+print(results_pretty, row.names = FALSE)
+```
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+plot_data <- data.frame(
+  Variable = rownames(model_summary),
+  OR = exp(model_summary[, "Estimate"]),
+  Lower = exp(model_summary[, "Estimate"] -
+                1.96 * model_summary[, "Std. Error"]),
+  Upper = exp(model_summary[, "Estimate"] +
+                1.96 * model_summary[, "Std. Error"]),
+  p_value = model_summary[, "Pr(>|z|)"]
+)
+
+plot_data <- subset(plot_data, Variable != "(Intercept)")
+
+ggplot(plot_data,
+       aes(x = OR, y = reorder(Variable, OR))) +
+  geom_vline(xintercept = 1, linetype = "dashed",
+             color = "grey50") +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper),
+                 height = 0.2, color = "steelblue") +
+  geom_point(size = 3, color = "steelblue") +
+  scale_x_log10() +
+  labs(
+    title = "Association between Covariates and CKD",
+    x = "Odds Ratio (95% CI, log scale)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+```{r, echo=FALSE}
+# Extract coefficients and covariance matrix
+b <- coef(model_int)
+V <- vcov(model_int)
+
+# Female: reference group
+beta_female <- b["alcohol_quantity"]
+
+se_female <- sqrt(
+  V["alcohol_quantity", "alcohol_quantity"]
+)
+
+# Male: main effect + interaction effect
+beta_male <- b["alcohol_quantity"] +
+  b["alcohol_quantity:sexMale"]
+
+se_male <- sqrt(
+  V["alcohol_quantity", "alcohol_quantity"] +
+  V["alcohol_quantity:sexMale",
+    "alcohol_quantity:sexMale"] +
+  2 * V["alcohol_quantity",
+        "alcohol_quantity:sexMale"]
+)
+
+# Create plotting data
+plot_interaction <- data.frame(
+  Sex = c("Female", "Male"),
+  OR = exp(c(beta_female, beta_male)),
+  Lower = exp(c(
+    beta_female - 1.96 * se_female,
+    beta_male - 1.96 * se_male
+  )),
+  Upper = exp(c(
+    beta_female + 1.96 * se_female,
+    beta_male + 1.96 * se_male
+  ))
+)
+
+# Plot
+ggplot(plot_interaction,
+       aes(x = OR, y = Sex)) +
+  geom_vline(
+    xintercept = 1,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_errorbar(
+    aes(xmin = Lower, xmax = Upper),
+    orientation = "y",
+    width = 0.2,
+    color = "steelblue",
+    linewidth = 0.8
+  ) +
+  geom_point(
+    color = "steelblue",
+    size = 3
+  ) +
+  scale_x_log10() +
+  labs(
+    title = "Association between Alcohol Quantity and CKD by Sex",
+    x = "Odds Ratio (95% CI)",
+    y = "Sex"
+  ) +
+  theme_classic(base_size = 12)
+
+```
+
+
