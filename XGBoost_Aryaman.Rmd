@@ -24,7 +24,7 @@ library(knitr)
 set.seed(2026)
 
 # ---- switches ---------------------------------------------------------------
-data_file  <- "~/Documents/NUTM-STAT-Group-17/Rcode/shared_df_filter.rds"
+data_file  <- "~/Documents/NUTM-STAT-Group-17/report/shared_df_filter.rds"   # Yilan's updated data (adds diabetes, lowercase names)
 save_folds <- FALSE   # TRUE writes Rcode/cv_folds_ckd.rds so Isabelle's random forest can reuse identical folds
 n_rep      <- 5       # repeats of stratified k-fold CV
 k_fold     <- 5
@@ -46,30 +46,30 @@ XGBoost can pick up non-linear effects and interactions that the logistic regres
 df <- readRDS(data_file)
 
 # Outcome: CKD = 1 if EGFRKDSA stage 1-6, 0 if no indicators of CKD
-y <- as.integer(as.character(df$CKD))
+y <- as.integer(as.character(df$ckd))
 
 # Predictors. Everything is numeric so SHAP values are easy to read.
 as01 <- function(f) as.integer(as.character(f))
 
-bev_cols <- c("Low_alcohol_beer", "Mid_strength_beer", "Full_strength_beer",
-              "White_wine", "Red_wine", "Low_alcohol_wine",
-              "Champagne_sparkling_wine", "Spirits_RTD", "Liqueurs",
-              "Spirits", "Fortified_wine", "Cider", "Cocktails")
+bev_cols <- c("low_alcohol_beer", "mid_strength_beer", "full_strength_beer",
+              "white_wine", "red_wine", "low_alcohol_wine",
+              "champagne_sparkling_wine", "spirits_rtd", "liqueurs",
+              "spirits", "fortified_wine", "cider", "cocktails")
 
 X <- data.frame(
-  male             = as.integer(df$SEX_factor == "Male"),
-  AGE              = df$AGE,
+  male             = as.integer(df$sex == "Male"),
+  AGE              = df$age,
   alcohol_quantity = df$alcohol_quantity,   # std drinks/day, last week
-  ALC_freq_3       = df$ALC_freq_3,         # ordinal survey code, days with 3+ drinks in past year
+  ALC_freq_3       = df$alcohol_frequency,         # ordinal survey code, days with 3+ drinks in past year
   smoker_current   = as.integer(df$smoker_status == "Current smoker"),
   smoker_ex        = as.integer(df$smoker_status == "Ex-smoker"),
-  daily_smoke      = as.integer(df$daily_smoke) - 1L  # 0 never, 1 <10y, 2 10-29y, 3 30+y
+  diabetes         = as01(df$diabetes)          # self-reported diabetes diagnosis (1 = yes)
 )
 X[bev_cols] <- lapply(df[bev_cols], as01)
 X <- as.matrix(X)
 
 alc_vars   <- c("alcohol_quantity", "ALC_freq_3", bev_cols)
-smoke_vars <- c("smoker_current", "smoker_ex", "daily_smoke")
+smoke_vars <- c("smoker_current", "smoker_ex")
 
 # Columns that must NOT be predictors:
 #  - eGFR_range: CKD is defined from eGFR/ACR, so it leaks the outcome
@@ -82,7 +82,7 @@ labels <- c(male = "Male sex", AGE = "Age (years)",
             alcohol_quantity = "Alcohol, std drinks/day (last week)",
             ALC_freq_3 = "Days with 3+ drinks (past year, code)",
             smoker_current = "Current smoker", smoker_ex = "Ex-smoker",
-            daily_smoke = "Years smoked daily (ordinal)",
+            diabetes = "Diabetes",
             setNames(gsub("_", " ", bev_cols), bev_cols))
 
 sample_tab <- data.frame(
@@ -95,6 +95,8 @@ kable(sample_tab, caption = "Analysis sample: adults aged 35+ with complete data
 ```
 
 **Sample note.** The shared data frame only keeps people with a recorded beverage type, i.e. people who drank in the survey week (only a handful of rows have zero alcohol). There is therefore no non-drinker reference group, and alcohol effects are read *within last-week drinkers*. This should be listed as a limitation.
+
+**Diabetes.** Diabetes (self-reported diagnosis) is included as a predictor because it is a major cause of CKD. It could also sit on the path from heavy drinking to CKD, so adjusting for it may hide part of alcohol's effect. Results should be read with that in mind.
 
 ## 2. Cross-validation set-up
 
@@ -189,7 +191,7 @@ xgb_fit_predict <- function(extra = list(), rounds = best_rounds) {
 
 glm_fit_predict <- function(Xtr, ytr, Xte) {   # logistic regression baseline with the sex x alcohol term
   d  <- as.data.frame(Xtr); d$y <- ytr
-  m  <- glm(y ~ male * alcohol_quantity + AGE + smoker_current + smoker_ex + daily_smoke,
+  m  <- glm(y ~ male * alcohol_quantity + AGE + smoker_current + smoker_ex + diabetes,
             data = d, family = binomial())
   predict(m, newdata = as.data.frame(Xte), type = "response")
 }
@@ -320,7 +322,8 @@ grp <- list(
   "Alcohol quantity"            = "alcohol_quantity",
   "Alcohol frequency (3+ drinks)" = "ALC_freq_3",
   "Beverage type (13 flags)"    = bev_cols,
-  "Smoking (3 variables)"       = smoke_vars
+  "Smoking (2 variables)"       = smoke_vars,
+  "Diabetes"                    = "diabetes"
 )
 grp_tab <- data.frame(Group = names(grp),
                       `Mean |SHAP| (summed)` = sapply(grp, function(v) sum(colMeans(abs(S[, v, drop = FALSE]))))
