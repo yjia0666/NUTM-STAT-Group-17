@@ -24,7 +24,7 @@ library(knitr)
 set.seed(2026)
 
 # ---- switches ---------------------------------------------------------------
-data_file  <- "~/Documents/NUTM-STAT-Group-17/report/shared_df_filter.rds"   # Yilan's updated data (adds diabetes, lowercase names)
+data_file  <- here("report", "shared_df_filter.rds")   # shared report data; here() finds it from the project root on any computer
 save_folds <- FALSE   # TRUE writes Rcode/cv_folds_ckd.rds so Isabelle's random forest can reuse identical folds
 n_rep      <- 5       # repeats of stratified k-fold CV
 k_fold     <- 5
@@ -362,6 +362,4 @@ ggplot(sh, aes(alcohol, shap, colour = Sex, fill = Sex)) +
 
 ## Reproducibility
 
-```{r session}
-sessionInfo()
-```
+Analysis run in R `r getRversion()` with xgboost `r packageVersion("xgboost")`, with fixed random seeds for the cross-validation folds and model fitting.
