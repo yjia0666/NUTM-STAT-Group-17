@@ -19,12 +19,12 @@ df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
 
 df <- df1 %>%
-  select(ABSLID, ABSPID, SEX, SMKSTAT, ALCF3, AGEB, AGEDIABC, ALINWKSD) %>%
+  dplyr::select(ABSLID, ABSPID, SEX, SMKSTAT, ALCF3, AGEB, ALINWKSD) %>%
   filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
   left_join(
       df2 %>%
       filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
-      select(ABSLID, ABSPID, EGFRKDSA),
+      dplyr::select(ABSLID, ABSPID, EGFRKDSA, DIABPRVE),
       by = c("ABSLID", "ABSPID")
     )
 ```
@@ -84,15 +84,16 @@ ckd_data <- df %>%
       ALINWKSD %in% c(98, 99) ~ NA_real_
     ),
     diabetes = case_when(
-      AGEDIABC %in% c(0, 9) ~ 0,
-      AGEDIABC %in% 1:5 ~ 1
+      DIABPRVE %in% c(0, 8) ~ NA_real_,
+      DIABPRVE %in% c(1, 2) ~ 1,
+      DIABPRVE %in% c(3, 4) ~ 0
     )
   )
 ```
 
 ```{r}
 alcohol_type <- read.csv(here("data", "AHSnhs11b14.csv"), stringsAsFactors = TRUE) %>%
-  select(
+  dplyr::select(
     ABSLID,
     ABSPID,
     ABSBID,
@@ -236,7 +237,7 @@ ckd_data <- df_filter %>%
       labels = c("0", "1")
     )
   ) %>%
-  select(
+  dplyr::select(
     -low_alcohol_beer,
     -mid_strength_beer,
     -full_strength_beer,

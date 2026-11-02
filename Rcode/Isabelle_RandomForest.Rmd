@@ -40,27 +40,6 @@ set.seed(123)
 df_filter <- readRDS("../report/shared_df_filter.rds")
 ```
 
-## Research Question
-
-### What is the association of alcohol consumption and CKD, and does sex modify this association? Smoking is a known risk factor for CKD, but does its effect differ between sexes?
-
-## How does Random Forest answer the research question?
-
-Random forest classification can determine CKD status, a categorical variable, via majority voting and random features of the original data. Although Random Forest does not explicitly determine the modifying effect of sex, prediction and variable importance can be determined. We can see how variation of CKD status, is explained by the alcohol variables like quantity, type or frequency, and sex. The Random Forest can only indirectly answer the research question, through the evaluation of variable importance and visual representations of a modifying effect via partial dependence plots. 
-
-Random Forest will not include smoking variables, and primarily focuses on the main question.
-
-## Assumptions 
-
-The assumption of the Random Forest method is that the prediction of the individual trees must have very low correlation from each other, and combining predictions from different trees improves accuracy.
-
-The training dataset should be representative of the true population. The training dataset is taken from the 2011-2012 Australian National Health Survey, and respondents from the same clusters may land in the testing and training sets. Even though the survey data is representative of the true population, it cannot fix sampling biases. The true population does not have an even split of healthy people and CKD, so our data also has an uneven distribution. A strictly representative training set does not allow the model to learn enough, so in the case of imbalanced classes, distributions may need to be altered. 
-
-There are 2,765 samples with Alcohol Consumption and CKD data, from the National Health Survey 2011-2012, which is sufficient for 9 input features (sex, Frequency of consuming 3 standard drinks a day, Age, Alcohol quantity in the last week, Alcohol type consumed in the last week - Beer, Wine, Spirits and Liqueurs, Cocktails, Cider). There is an assumption that recent behaviour in Alcohol quantity reflects the respondents' habitual intake of Alcohol, and that there are no recent life changes of sudden sobriety or escalation. The Frequency of consuming 3 standard drinks a day was assumed to reflect chronic exposure to Alcohol.
-
-
-## Using Random Forest: tuning parameters, variable examination
-
 
 ```{r}
 ckd_filter <- df_filter %>%
@@ -126,9 +105,8 @@ ckd_tab %>%
   tab_header(title = "CKD status ") %>%
   fmt_number(columns = Percent, decimals = 1, pattern = "{x}%")
 ```
+
 ### Resolving Class Imbalance 
-
-
 
 ```{r}
 set.seed(123)
@@ -343,7 +321,7 @@ sens_table <- data.frame(Name = names,
 
 ```
 
-The best hyper-parametric combination appears to be mtry of 3 with a min.node.size of 12, which gave the highest sensitivity of 0.665. The ROC 0.699 means there is acceptable discrimination.
+The best hyper-parametric combination appears to be mtry of 5 with a min.node.size of 16, which gave the highest sensitivity of 0.656. The ROC 0.7195 means there is acceptable discrimination.
 
 ## Adjusted Random Forest 
 
@@ -559,7 +537,13 @@ imp_data <- as.data.frame((randomForest::importance(rf_adjusted)))
 
 rownames(imp_data)[rownames(imp_data) == "age"] <- "Age"
 rownames(imp_data)[rownames(imp_data) == "alcohol_quantity" ] <- "Alcohol Quantity"
+rownames(imp_data)[rownames(imp_data) == "alcohol_frequency" ] <- "Alcohol Frequency"
+rownames(imp_data)[rownames(imp_data) == "wine" ] <- "Wine"
 rownames(imp_data)[rownames(imp_data) == "sex" ] <- "Sex"
+rownames(imp_data)[rownames(imp_data) == "cider" ] <- "Cider"
+rownames(imp_data)[rownames(imp_data) == "diabetes" ] <- "Diabetes"
+rownames(imp_data)[rownames(imp_data) == "beer" ] <- "Beer"
+rownames(imp_data)[rownames(imp_data) == "cocktails" ] <- "Cocktails"
 rownames(imp_data)[rownames(imp_data) == "spirits_Liqueurs"] <- "Spirits and Liqueurs"
 rownames(imp_data)[rownames(imp_data) == "ALC_freq_3"] <- "Frequency of alcohol consumption"
 
