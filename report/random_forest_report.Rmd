@@ -1,0 +1,508 @@
+---
+title: "Random Forest Report"
+author: "540706002"
+output: 
+  html_document:
+    code_folding: hide
+
+---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+  }
+  h1, h2, h3 {
+    font-family: Georgia, serif;
+  }
+  code {
+    font-family: "Courier New", Courier, monospace;
+  }
+</style>
+
+```{r, message = FALSE, warning = FALSE}
+
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(tidyverse)
+library(randomForest)
+library(dplyr)
+library(ranger)
+library(pROC)
+library(ggplot2)
+library(pdp)
+library(MASS)
+library(gt)
+
+set.seed(123)
+
+df_filter <- readRDS("../report/shared_df_filter.rds")
+
+pdf("Random_Forest_plots_pdf", width = 6, height = 4)
+
+```
+
+```{r}
+ckd_filter <- df_filter %>%
+  dplyr::mutate(
+    beer = factor(
+      as.character(low_alcohol_beer) == "1" |
+      as.character(mid_strength_beer) == "1" |
+      as.character(full_strength_beer) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    ),
+
+    wine = factor(
+      as.character(white_wine) == "1" |
+      as.character(red_wine) == "1" |
+      as.character(low_alcohol_wine) == "1" |
+      as.character(champagne_sparkling_wine) == "1" |
+      as.character(fortified_wine) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    ),
+
+    spirits_liqueurs = factor(
+      as.character(spirits_rtd) == "1" |
+      as.character(liqueurs) == "1" |
+      as.character(spirits) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    )
+  ) %>%
+  dplyr::select(
+    ckd,
+    age,
+    sex,
+    alcohol_frequency,
+    alcohol_quantity,
+    wine,
+    beer,
+    spirits_liqueurs,
+    diabetes,
+    cider,
+    cocktails
+
+  )
+
+```
+
+### Resolving Class Imbalance 
+
+```{r}
+
+set.seed(123)
+
+# Data split
+ 
+idx   <- sample(nrow(ckd_filter), 0.7 * nrow(ckd_filter))
+train <- ckd_filter[idx, ]
+test  <- ckd_filter[-idx, ]
+saveRDS(list(train = train, test = test), "split.rds")   
+
+train$ckd <- factor(train$ckd, levels = c(0, 1), labels = c("No_CKD", "CKD"))
+test$ckd  <- factor(test$ckd,  levels = c(0, 1), labels = c("No_CKD", "CKD"))
+
+```
+
+
+In order to fix class imbalance and retain the trustworthiness of OOB error, RandomForest can draw balanced samples on each tree itself i.e. downsampling the majority class. This undersampling method avoids misleading and inflated accuracy unlike the class weights method.
+
+```{r, results = 'hide', message = FALSE}
+set.seed(123)
+
+# Need to fix class imbalance via balanced samples
+
+n_min <- sum(train$ckd == "CKD")
+
+rf_balanced <- randomForest(
+  ckd ~ ., data = train,
+  ntree = 500, importance = TRUE,
+  strata = train$ckd,
+  sampsize = c(n_min, n_min) # Down-sampling the majority class
+)
+
+rf_balanced   # the OOB error and class-specific errors are trustworthy here
+
+pred_class_balanced <- predict(rf_balanced, test)
+pred_prob_balanced  <- predict(rf_balanced, test, type = "prob")[, "CKD"]
+
+table(Predicted = pred_class_balanced, Actual = test$ckd)
+
+CM_balanced <- confusionMatrix(pred_class_balanced, test$ckd, positive = "CKD") # Confusion Matrix
+
+cm_df <- as.data.frame(CM_balanced$table)
+
+# Plotting Confusion Matrix with high aesthetics
+
+ggplot(data = cm_df, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white", lwd = 1, linetype = 1) +  # Creates clear tile borders
+  geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + # Large, bold numbers
+  scale_fill_gradient(low = "skyblue", high = "skyblue3") + # Sleek blue gradient theme
+  labs(
+    title = "Balanced Random Forest Performance",
+    caption = "AUC-ROC is more reliable than accuracy for downsampled Random Forests.",
+    subtitle = paste0("Overall Accuracy: ", round(CM_balanced$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_balanced$err.rate[nrow(rf_balanced$err.rate), "OOB"] * 100, 2), "%"),
+    x = "Actual Classes",
+    y = "Predicted Classes"
+  ) +
+  theme_minimal(base_size = 14) 
+
+roc_obj <- roc(test$ckd, pred_prob_balanced)
+auc_value_balanced <- auc(roc(test$ckd, pred_prob_balanced, levels = c("No_CKD", "CKD"), direction = "<"))  
+plot(roc_obj, main = paste("Area under Curve of the Balanced Random Forest is", round(auc_value_balanced, 3)))
+
+sens_value <- CM_balanced$byClass["Sensitivity"]
+
+Class <- c("No CKD", "CKD")
+Errors <- round(rf_balanced$confusion[, "class.error"], 3)
+
+class_errors <- data.frame(Class, Errors) %>% gt() %>%
+  cols_label(Class = "Status",
+             Errors = "Class Errors") %>%
+    tab_header(title = "CKD status ") 
+
+class_errors
+
+```
+
+
+
+### Hyperparametric tuning 
+
+Previously, when training the Random Forest model, it automatically deduces the optimal values for the model hyperparameters. However, after using random search to sample parameter combinations, another grid can be defined to deduce the best model hyperparameters. 
+
+```{r}
+set.seed(123)
+
+# Random Search for Hyperparameter tuning
+
+# Define a random search control
+
+ctrl_random <- trainControl(method = "cv", number = 5, search = "random")
+
+random_model <- train(
+  ckd ~ .,
+  data = train,
+  method = "ranger",
+  tuneLength = 10,   # Testing 10 random combinations from the hyperparameter space
+  trControl = ctrl_random
+)
+
+gt(random_model$bestTune) |> tab_header(title = md("Best Hyperparameters from **Random Search**")) |> cols_align(
+  align = "center")
+
+```
+
+Random Search finds that a minimum node size of 14 is the optimal value, typically suggesting the model currently overfits at lower values with the minimum node size as 1. To see if 14 is truly optimal, a focused GridSearch can be done to search around that range. 
+
+### Focused Grid Search - Sensitivity
+
+
+```{r}
+set.seed(123)
+
+ctrl <- trainControl(
+  method = "cv", number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,   # ROC, Sens, Spec
+  sampling = "down"                    # balance within each CV fold
+)
+
+fit <- train(
+  ckd ~ ., data = train, method = "ranger",
+  metric = "ROC", trControl = ctrl,
+  tuneGrid = expand.grid(mtry = c(6, 7, 8, 9, 10),
+                         min.node.size = c(1, 12, 13, 14, 15, 16, 17, 18),
+                         splitrule = "gini")
+)
+
+#Specificity is the recall for CKD sensitivity, as caret treats the first outcome level as the positive class and our target factor levels was ordered [No CKD, CKD]
+
+fit$results %>% 
+  arrange(desc(Spec)) %>%   
+  slice_head(n = 5) %>% # Only the top five Sensitivities are shown
+  gt() %>% 
+  cols_move_to_start(columns = "Spec") %>%
+  cols_move_to_start(columns = "min.node.size") %>%
+  cols_move_to_start(columns = "mtry") %>%
+  cols_hide(columns = "splitrule") %>%
+  cols_label(Spec = "Sensitivity", Sens = "Specificity") %>%
+  tab_header(title = "Combination of Hyper parameters which leads to highest Sensitivity")
+
+chosen <- fit$results %>% filter(mtry == 5, min.node.size == 12)   # The final combination
+
+names <- c("Initial balanced RF", "Final RF")
+
+sensitivity <- c(sens_value, chosen$Sens)
+
+sens_table <- data.frame(Name = names, 
+                         Sensitivity = sensitivity) %>% gt()
+
+```
+
+The best hyper-parametric combination appears to be mtry of 5 with a min.node.size of 16, which gave the highest sensitivity of 0.6560354. The ROC 0.7195007 means there is acceptable discrimination.
+
+## Adjusted Random Forest 
+
+```{r, message = 'false'}
+set.seed(123)
+
+rf_adjusted <- randomForest(
+  ckd ~ ., data = train,
+  ntree = 500, importance = TRUE,
+  strata = train$ckd,
+  mtry = 3,
+  nodesize = 12,
+  sampsize = c(n_min, n_min)
+) # The OOB error and class-specific errors are trustworthy here
+
+pred_class <- predict(rf_adjusted, test)
+pred_prob  <- predict(rf_adjusted, test, type = "prob")[, "CKD"]
+
+CM_adjusted <- confusionMatrix(pred_class, test$ckd, positive = "CKD") # Confusion Matrix
+cm_adjusted <- as.data.frame(CM_adjusted$table)
+
+# Plotting Confusion Matrix with high aesthetics
+
+ggplot(data = cm_adjusted, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white", lwd = 1, linetype = 1) +  
+  geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + 
+  scale_fill_gradient(low = "aquamarine1", high = "aquamarine3") + 
+  labs(
+    title = "Random Forest Performance of Adjusted Random Forest",
+    subtitle = paste0("Overall Accuracy: ", round(CM_adjusted$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_balanced$err.rate[nrow(rf_balanced$err.rate), "OOB"] * 100, 2), "%"),
+    x = "Actual Classes",
+    y = "Predicted Classes"
+  ) +
+  theme_minimal(base_size = 14) 
+
+
+Class <- c("No CKD", "CKD")
+Errors <- round(rf_adjusted$confusion[, "class.error"], 3)
+class_errors <- data.frame(Class, Errors) %>% gt() %>%
+  cols_label(Class = "Status",
+             Errors = "Class Errors") %>%
+    tab_header(title = "CKD status ") 
+
+class_errors
+```
+
+```{r, message = 'false'}
+roc_obj <- roc(test$ckd, pred_prob)
+auc_value_adjusted <- auc(roc(test$ckd, pred_prob, levels = c("No_CKD", "CKD"), direction = "<"))  
+plot(roc_obj, main = paste("Area under Curve of the Adjusted Random Forest is", round(auc_value_adjusted, 3)), col = "aquamarine4")
+
+
+```
+
+### Assessing Performance further
+
+The tuned complex random forest should be able to beat the accuracy score of a single decision tree. The use of majority voting to classify CKD should cancel out noise and outliers. The rpart model uses the exact same undersampled training set, to make the comparison fair.
+
+```{r, message = 'false'}
+set.seed(123)
+
+tree <- rpart(ckd ~ ., data = train, method = "class",
+              parms = list(prior = c(0.5, 0.5)),
+              control = rpart.control(cp = 0.005, minbucket = 30))
+
+rpart.plot(tree, type = 2, extra = 104, main = "Chronic Kidney Disease Data")
+
+prediction_prob <- predict(tree, test, type = "prob")
+CKD_prob <- prediction_prob[, "CKD"]
+
+roc_obj <- roc(test$ckd, CKD_prob)
+auc_value <- auc(roc_obj)
+
+plot(roc_obj, main = paste("Area under Curve of Decision Tree is", round(auc_value, 3)))
+
+```
+
+The Random Forest Model outperforms the single decision tree, wherein yielding a better AUC of 0.74 compared to 0.712.
+
+
+## Does omitting sex harm prediction accuracy: Random Forest without sex
+
+The comparison of a complete Random Forest Model to a Random Forest model without sex, can provide an exact quantification of sex in prediction performance and variable importance.
+
+```{r, message = 'false'}
+
+# No-sex model, same people as the with-sex model
+ckd_filter_no_sex <- ckd_filter %>%
+  dplyr::select(-sex) 
+
+idx   <- sample(nrow(ckd_filter_no_sex), 0.7 * nrow(ckd_filter_no_sex))
+train_ns <- train %>% dplyr::select(-sex)
+test_ns  <- test  %>% dplyr::select(-sex)
+
+# Need to fix class imbalance via balanced samples
+
+set.seed(123)
+rf_nosex <- randomForest(
+  ckd ~ ., data = train_ns,
+  ntree = 500, importance = TRUE,
+  strata = train_ns$ckd,
+  mtry = 3,
+  nodesize = 12,
+  sampsize = c(n_min, n_min) # Down-sampling the majority class
+)
+
+```
+
+```{r, message = 'false'}
+set.seed(123)
+
+pred_class_nosex <- predict(rf_nosex, test_ns)
+pred_prob_nosex  <- predict(rf_nosex, test_ns, type = "prob")[, 2]
+
+CM_nosex <- confusionMatrix(pred_class_nosex, test_ns$ckd, positive = "CKD") # Confusion Matrix
+
+cm_nosex <- as.data.frame(CM_nosex$table)
+
+# Plotting Confusion Matrix with high aesthetics
+
+ggplot(data = cm_nosex, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white", lwd = 1, linetype = 1) +  # Creates clear tile borders
+  geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + # Large, bold numbers
+  scale_fill_gradient(low = "darkseagreen2", high = "darkseagreen3") + # Sleek blue gradient theme
+  labs(
+    title = "Random Forest without 'Sex' Performance",
+    subtitle = paste0("Overall Accuracy: ", round(CM_nosex$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_nosex$err.rate[nrow(rf_nosex$err.rate), "OOB"] * 100, 2), "%"), 
+    x = "Actual Classes",
+    y = "Predicted Classes"
+  ) +
+  theme_minimal(base_size = 14) 
+
+
+Class <- c("No CKD", "CKD")
+Errors <- rf_nosex$confusion[, "class.error"]
+class_errors <- data.frame(Class, Errors) %>% gt() %>%
+  cols_label(Class = "Status",
+             Errors = "Class Errors") %>%
+    tab_header(title = "CKD status ") 
+
+class_errors
+
+roc_obj_nosex <- (roc(test_ns$ckd, pred_prob_nosex, levels = c("No_CKD", "CKD"), direction = "<"))  
+auc_valuenosex <- auc(roc_obj_nosex)
+
+plot(roc_obj_nosex, main = paste("Area under Curve of Random Forest without 'sex' is", round(auc_valuenosex, 3)), col="darkseagreen3")
+
+sens <- sensitivity(pred_class_nosex, test_ns$ckd) #Sensitivity value of no sex RF
+
+names <- c("RF without sex", "Final RF")
+
+sensitivity <- c(sens, CM_nosex$byClass["Sensitivity"])
+
+sensitivity_table <- data.frame(Name = names, Sensitivity = sensitivity) %>% gt()
+
+
+```
+
+```{r}
+
+roc_full <- roc(test$ckd, pred_prob, levels = c("No_CKD","CKD"), direction = "<")
+
+roc_ns   <- roc(test_ns$ckd, pred_prob_nosex, levels = c("No_CKD","CKD"), direction = "<")
+
+roc.test(roc_full, roc_ns)   # DeLong test for paired ROC curves
+
+```
+
+Removing sex from the model does not reduce discrimination, the AUC was 0.740 with sex and 0.743 without (difference -0.003, 95% CI -0.018 to 0.012; DeLong p = 0.69). A non-significant test does not prove there's no interaction effect between sex and alcohol. A prediction based test is not a formal interaction test, sex could matter for the alcohol-CKD association without improving AUC, because AUC is dominated by age. De-Long's test can only capture the test-set sampling error, ignoring the randomness of the Forest and the seed. 
+
+
+## Partial-dependence plots of Alcohol Quantity, conditioned on sex.
+
+Partial-dependence plots can show how predicted CKD probability changes across Alcohol Quantity, and stratification allows separate marginalisation over female and male empirical distributions of all other covariates. If female and male lines have different slopes, there is a visual representation of a modifying effect of sex. If there is a baseline difference between female and male lines, that shows the marginal effect of sex.
+
+
+```{r, message = FALSE}
+set.seed(123)
+
+pd <- partial(rf_adjusted, pred.var = c("alcohol_quantity", "sex"),
+              which.class = 2, prob = TRUE, train = train,
+              grid.resolution = 20)
+
+ggplot(pd, aes(alcohol_quantity, yhat, colour = sex)) +
+  geom_smooth(se = FALSE, span = 0.6) +
+  geom_rug(data = train, aes(x = alcohol_quantity), inherit.aes = FALSE, alpha = 0.1) +
+  labs(x = "Alcohol quantity in last week", y = "Predicted probability of CKD",
+       colour = "Sex") +
+  theme_minimal()
+
+```
+
+
+
+The PDP shows non-parallel curves, wherein the male slope is about five times the female slope over 0 to 7 drinks. This indicates effect modification, with a stronger alcohol association in males. There is more than just a marginal effect of sex, because the gap between males and females grows with alcohol quantity. PDP is descriptive, not a formal hypothesis test and has no confidence band, so there is no certainty that this visual difference is not just noise.
+
+Males: predicted CKD risk climbs from about 0.365 at zero drinks to about 0.465 at 7 to 8 drinks, then stays roughly flat at 0.455 to 0.467 out to 19. That’s an increase of about 0.10.
+Females: risk is about 0.324 at zero, dips slightly to 0.320 at 2 drinks, rises to about 0.342 by 8, and slightly increases to 0.345 at 19. The total change is about 0.02, which is close to flat.
+Gap between sexes: about 0.04 at zero drinks, then widens to about 0.12 from roughly 7 drinks onward, and staying there.
+
+Association of alcohol and CKD: in the Random Forest, higher alcohol quantity goes with higher predicted CKD, mainly seen in males and  between 0 and about 7 drinks. Females have a negligible association, although this only informs us of what the model learnt. Ultimately, PDP cannot separate alcohol from age, which is the dominant variable.
+
+
+
+### Global Importance of sex in Random Forest
+
+```{r}
+set.seed(123)
+
+# Extract importance values and visualise; Shows what variables contributed most to the random forest
+
+imp_data <- as.data.frame((randomForest::importance(rf_adjusted))) 
+
+rownames(imp_data)[rownames(imp_data) == "age"] <- "Age"
+rownames(imp_data)[rownames(imp_data) == "alcohol_quantity" ] <- "Alcohol Quantity"
+rownames(imp_data)[rownames(imp_data) == "alcohol_frequency" ] <- "Alcohol Frequency"
+rownames(imp_data)[rownames(imp_data) == "wine" ] <- "Wine"
+rownames(imp_data)[rownames(imp_data) == "sex" ] <- "Sex"
+rownames(imp_data)[rownames(imp_data) == "cider" ] <- "Cider"
+rownames(imp_data)[rownames(imp_data) == "diabetes" ] <- "Diabetes"
+rownames(imp_data)[rownames(imp_data) == "beer" ] <- "Beer"
+rownames(imp_data)[rownames(imp_data) == "cocktails" ] <- "Cocktails"
+rownames(imp_data)[rownames(imp_data) == "spirits_liqueurs"] <- "Spirits and Liqueurs"
+rownames(imp_data)[rownames(imp_data) == "ALC_freq_3"] <- "Frequency of alcohol consumption"
+
+imp_data$Variable <- rownames(imp_data)
+
+
+# Display results in table
+
+imp_data %>% 
+  arrange(desc(MeanDecreaseAccuracy)) %>%
+  gt() %>% 
+  cols_move_to_start(columns = "Variable") %>%
+  cols_label(
+    No_CKD = "No CKD"
+  )
+
+# Pivot to long format for easier ggplot grouping
+imp_long <- imp_data %>%
+  rename(MDA = MeanDecreaseAccuracy, Gini = MeanDecreaseGini) %>%
+  pivot_longer(cols = c(MDA, Gini), names_to = "Metric", values_to = "Importance")
+
+# Create a faceted horizontal dot plot
+ggplot(imp_long, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_segment(aes(xend = Variable, yend = 0), color = "gray70", linewidth = 0.6) +
+  geom_point(color = "#2c3e50", size = 3) +
+  facet_wrap(~Metric, scales = "free_x") +   
+  coord_flip() +                             # Flips to horizontal for readable text labels
+  labs(
+    title = "Random Forest Variable Importance",
+    x = NULL,
+    y = "Importance Metric Score"
+  )  +
+  theme(strip.background = element_rect(fill = "dodgerblue3", colour = "white"),
+    strip.text = element_text(face = "bold", size = 12),
+    panel.spacing = unit(2, "lines")
+  )
+
+
+```
+

@@ -37,7 +37,7 @@ library(gt)
 
 set.seed(123)
 
-ckd_filter <- readRDS("shared_df_filter.rds")
+df_filter <- readRDS("../report/shared_df_filter.rds")
 ```
 
 ## Research Question
@@ -63,50 +63,59 @@ There are 2,765 samples with Alcohol Consumption and CKD data, from the National
 
 
 ```{r}
-#A categorical variable Alcohol type with multiple levels of different alcohol type was made into dummy variables where 1 indicates the consumption of that alcohol type. The types of Beer, Wine and Spirits/Liqueurs were further condensed together.
+ckd_filter <- df_filter %>%
+  dplyr::mutate(
+    beer = factor(
+      as.character(low_alcohol_beer) == "1" |
+      as.character(mid_strength_beer) == "1" |
+      as.character(full_strength_beer) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    ),
 
-#Combining Beer Together
-ckd_filter$Beer <- factor(
-  as.character(ckd_filter$Low_alcohol_beer) == "1" |
-  as.character(ckd_filter$Mid_strength_beer) == "1" |
-  as.character(ckd_filter$Full_strength_beer) == "1",
-  levels = c(FALSE, TRUE),
-  labels = c("0", "1")
-)
+    wine = factor(
+      as.character(white_wine) == "1" |
+      as.character(red_wine) == "1" |
+      as.character(low_alcohol_wine) == "1" |
+      as.character(champagne_sparkling_wine) == "1" |
+      as.character(fortified_wine) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    ),
 
-#Combining Wine Together
-ckd_filter$Wine <- factor(
-  as.character(ckd_filter$White_wine) == "1" |
-  as.character(ckd_filter$Red_wine) == "1" |
-  as.character(ckd_filter$Low_alcohol_wine) == "1" |
-  as.character(ckd_filter$Champagne_sparkling_wine) == "1" |
-  as.character(ckd_filter$Fortified_wine) == "1",
-  levels = c(FALSE, TRUE),
-  labels = c("0", "1")
-)
+    spirits_liqueurs = factor(
+      as.character(spirits_rtd) == "1" |
+      as.character(liqueurs) == "1" |
+      as.character(spirits) == "1",
+      levels = c(FALSE, TRUE),
+      labels = c("0", "1")
+    )
+  ) %>%
+  dplyr::select(
+    ckd,
+    age,
+    sex,
+    alcohol_frequency,
+    alcohol_quantity,
+    wine,
+    beer,
+    spirits_liqueurs,
+    diabetes,
+    cider,
+    cocktails
 
-#Combining Spirits and Liqueurs Together
-ckd_filter$Spirits_Liqueurs <- factor(
-  as.character(ckd_filter$Spirits_RTD) == "1" |
-  as.character(ckd_filter$Liqueurs) == "1" |
-  as.character(ckd_filter$Spirits) == "1",
-  levels = c(FALSE, TRUE),
-  labels = c("0", "1")
-)
-
-ckd_filter <- ckd_filter %>%
-  dplyr::select(-SEX, -Alcohol_risk, -smoker_status, -daily_smoke, -Alcohol_risk_7day, -eGFR_range, -Low_alcohol_beer, -Mid_strength_beer, -Full_strength_beer, -White_wine, -Red_wine, -Low_alcohol_wine, -Champagne_sparkling_wine, -Fortified_wine, -Spirits_RTD, -Liqueurs, -Spirits) 
+  )
 
 ```
 
 ```{r}
 ckd_tab <- ckd_filter %>%
-  count(CKD) %>%
-  mutate(
-    Status = ifelse(CKD == "1", "CKD", "No CKD"),
-    CKD = ifelse(CKD == "1", "CKD", "No_CKD"),
+  count(ckd) %>%
+  dplyr::mutate(
+    Status = ifelse(ckd == "No CKD", "CKD", "No CKD"),
+    ckd = ifelse(ckd == "CKD", "CKD", "No CKD"),
     Percent = round(100 * n / sum(n), 1),
-    CKD = NULL
+    ckd = NULL
   ) 
 
 ckd_tab %>%
@@ -131,8 +140,8 @@ train <- ckd_filter[idx, ]
 test  <- ckd_filter[-idx, ]
 saveRDS(list(train = train, test = test), "split.rds")   
 
-train$CKD <- factor(train$CKD, levels = c(0, 1), labels = c("No_CKD", "CKD"))
-test$CKD  <- factor(test$CKD,  levels = c(0, 1), labels = c("No_CKD", "CKD"))
+train$ckd <- factor(train$ckd, levels = c(0, 1), labels = c("No_CKD", "CKD"))
+test$ckd  <- factor(test$ckd,  levels = c(0, 1), labels = c("No_CKD", "CKD"))
 
 ```
 
@@ -144,12 +153,12 @@ set.seed(123)
 
 # Need to fix class imbalance via balanced samples
 
-n_min <- sum(train$CKD == "CKD")
+n_min <- sum(train$ckd == "CKD")
 
 rf_balanced <- randomForest(
-  CKD ~ ., data = train,
+  ckd ~ ., data = train,
   ntree = 500, importance = TRUE,
-  strata = train$CKD,
+  strata = train$ckd,
   sampsize = c(n_min, n_min) # Down-sampling the majority class
 )
 
@@ -158,9 +167,9 @@ rf_balanced   # the OOB error and class-specific errors are trustworthy here
 pred_class_balanced <- predict(rf_balanced, test)
 pred_prob_balanced  <- predict(rf_balanced, test, type = "prob")[, "CKD"]
 
-table(Predicted = pred_class_balanced, Actual = test$CKD)
+table(Predicted = pred_class_balanced, Actual = test$ckd)
 
-CM_balanced <- confusionMatrix(pred_class_balanced, test$CKD, positive = "CKD") # Confusion Matrix
+CM_balanced <- confusionMatrix(pred_class_balanced, test$ckd, positive = "CKD") # Confusion Matrix
 
 cm_df <- as.data.frame(CM_balanced$table)
 
@@ -179,8 +188,8 @@ ggplot(data = cm_df, aes(x = Reference, y = Prediction, fill = Freq)) +
   ) +
   theme_minimal(base_size = 14) 
 
-roc_obj <- roc(test$CKD, pred_prob_balanced)
-auc_value_balanced <- auc(roc(test$CKD, pred_prob_balanced, levels = c("No_CKD", "CKD"), direction = "<"))  
+roc_obj <- roc(test$ckd, pred_prob_balanced)
+auc_value_balanced <- auc(roc(test$ckd, pred_prob_balanced, levels = c("No_CKD", "CKD"), direction = "<"))  
 plot(roc_obj, main = paste("Area under Curve of the Balanced Random Forest is", round(auc_value_balanced, 3)))
 
 sens_value <- CM_balanced$byClass["Sensitivity"]
@@ -212,7 +221,7 @@ set.seed(123)
 ctrl_random <- trainControl(method = "cv", number = 5, search = "random")
 
 random_model <- train(
-  CKD ~ .,
+  ckd ~ .,
   data = train,
   method = "ranger",
   tuneLength = 10,   # Testing 10 random combinations from the hyperparameter space
@@ -250,7 +259,7 @@ fine_tune_grid <- expand.grid(
 
 # Running the final grid search
 final_model <- train(
-  CKD ~ ., 
+  ckd ~ ., 
   data = df_train,
   method = "ranger", 
   trControl = final_control,
@@ -268,7 +277,7 @@ clean_table |> tab_header(title = md("Focused Grid Search Results"))
 
 pred_class <- predict(final_model, df_test)
 
-CM_randomsearch <- confusionMatrix(pred_class, test$CKD, positive = "CKD") # Confusion Matrix
+CM_randomsearch <- confusionMatrix(pred_class, test$ckd, positive = "CKD") # Confusion Matrix
 cm_randomsearch <- as.data.frame(CM_randomsearch$table)
 
 # Plotting Confusion Matrix with high aesthetics
@@ -303,7 +312,7 @@ ctrl <- trainControl(
 )
 
 fit <- train(
-  CKD ~ ., data = train, method = "ranger",
+  ckd ~ ., data = train, method = "ranger",
   metric = "ROC", trControl = ctrl,
   tuneGrid = expand.grid(mtry = c(3, 4, 5, 6, 7, 8),
                          min.node.size = c(1, 12, 13, 14, 15, 16, 17, 18),
@@ -342,9 +351,9 @@ The best hyper-parametric combination appears to be mtry of 3 with a min.node.si
 set.seed(123)
 
 rf_adjusted <- randomForest(
-  CKD ~ ., data = train,
+  ckd ~ ., data = train,
   ntree = 500, importance = TRUE,
-  strata = train$CKD,
+  strata = train$ckd,
   mtry = 3,
   nodesize = 12,
   sampsize = c(n_min, n_min)
@@ -353,7 +362,7 @@ rf_adjusted <- randomForest(
 pred_class <- predict(rf_adjusted, test)
 pred_prob  <- predict(rf_adjusted, test, type = "prob")[, "CKD"]
 
-CM_adjusted <- confusionMatrix(pred_class, test$CKD, positive = "CKD") # Confusion Matrix
+CM_adjusted <- confusionMatrix(pred_class, test$ckd, positive = "CKD") # Confusion Matrix
 cm_adjusted <- as.data.frame(CM_adjusted$table)
 
 # Plotting Confusion Matrix with high aesthetics
@@ -382,8 +391,8 @@ class_errors
 ```
 
 ```{r, message = 'false'}
-roc_obj <- roc(test$CKD, pred_prob)
-auc_value_adjusted <- auc(roc(test$CKD, pred_prob, levels = c("No_CKD", "CKD"), direction = "<"))  
+roc_obj <- roc(test$ckd, pred_prob)
+auc_value_adjusted <- auc(roc(test$ckd, pred_prob, levels = c("No_CKD", "CKD"), direction = "<"))  
 plot(roc_obj, main = paste("Area under Curve of the Adjusted Random Forest is", round(auc_value_adjusted, 3)), col = "aquamarine4")
 
 
@@ -396,7 +405,7 @@ The tuned complex random forest should be able to beat the accuracy score of a s
 ```{r, message = 'false'}
 set.seed(123)
 
-tree <- rpart(CKD ~ ., data = train, method = "class",
+tree <- rpart(ckd ~ ., data = train, method = "class",
               parms = list(prior = c(0.5, 0.5)),
               control = rpart.control(cp = 0.005, minbucket = 30))
 
@@ -405,7 +414,7 @@ rpart.plot(tree, type = 2, extra = 104, main = "Chronic Kidney Disease Data")
 prediction_prob <- predict(tree, test, type = "prob")
 CKD_prob <- prediction_prob[, "CKD"]
 
-roc_obj <- roc(test$CKD, CKD_prob)
+roc_obj <- roc(test$ckd, CKD_prob)
 auc_value <- auc(roc_obj)
 
 plot(roc_obj, main = paste("Area under Curve of Decision Tree is", round(auc_value, 3)))
@@ -423,19 +432,19 @@ The comparison of a complete Random Forest Model to a Random Forest model withou
 
 # No-sex model, same people as the with-sex model
 ckd_filter_no_sex <- ckd_filter %>%
-  dplyr::select(-SEX_factor) 
+  dplyr::select(-sex) 
 
 idx   <- sample(nrow(ckd_filter_no_sex), 0.7 * nrow(ckd_filter_no_sex))
-train_ns <- train %>% dplyr::select(-SEX_factor)
-test_ns  <- test  %>% dplyr::select(-SEX_factor)
+train_ns <- train %>% dplyr::select(-sex)
+test_ns  <- test  %>% dplyr::select(-sex)
 
 # Need to fix class imbalance via balanced samples
 
 set.seed(123)
 rf_nosex <- randomForest(
-  CKD ~ ., data = train_ns,
+  ckd ~ ., data = train_ns,
   ntree = 500, importance = TRUE,
-  strata = train_ns$CKD,
+  strata = train_ns$ckd,
   mtry = 3,
   nodesize = 12,
   sampsize = c(n_min, n_min) # Down-sampling the majority class
@@ -449,7 +458,7 @@ set.seed(123)
 pred_class_nosex <- predict(rf_nosex, test_ns)
 pred_prob_nosex  <- predict(rf_nosex, test_ns, type = "prob")[, 2]
 
-CM_nosex <- confusionMatrix(pred_class_nosex, test_ns$CKD, positive = "CKD") # Confusion Matrix
+CM_nosex <- confusionMatrix(pred_class_nosex, test_ns$ckd, positive = "CKD") # Confusion Matrix
 
 cm_nosex <- as.data.frame(CM_nosex$table)
 
@@ -477,12 +486,12 @@ class_errors <- data.frame(Class, Errors) %>% gt() %>%
 
 class_errors
 
-roc_obj_nosex <- (roc(test_ns$CKD, pred_prob_nosex, levels = c("No_CKD", "CKD"), direction = "<"))  
+roc_obj_nosex <- (roc(test_ns$ckd, pred_prob_nosex, levels = c("No_CKD", "CKD"), direction = "<"))  
 auc_valuenosex <- auc(roc_obj_nosex)
 
 plot(roc_obj_nosex, main = paste("Area under Curve of Random Forest without 'sex' is", round(auc_valuenosex, 3)), col="darkseagreen3")
 
-sens <- sensitivity(pred_class_nosex, test_ns$CKD) #Sensitivity value of no sex RF
+sens <- sensitivity(pred_class_nosex, test_ns$ckd) #Sensitivity value of no sex RF
 
 names <- c("RF without sex", "Final RF")
 
@@ -492,11 +501,12 @@ sensitivity_table <- data.frame(Name = names, Sensitivity = sensitivity) %>% gt(
 
 
 ```
+
 ```{r}
 
-roc_full <- roc(test$CKD, pred_prob, levels = c("No_CKD","CKD"), direction = "<")
+roc_full <- roc(test$ckd, pred_prob, levels = c("No_CKD","CKD"), direction = "<")
 
-roc_ns   <- roc(test_ns$CKD, pred_prob_nosex, levels = c("No_CKD","CKD"), direction = "<")
+roc_ns   <- roc(test_ns$ckd, pred_prob_nosex, levels = c("No_CKD","CKD"), direction = "<")
 
 roc.test(roc_full, roc_ns)   # DeLong test for paired ROC curves
 
@@ -513,11 +523,11 @@ Partial-dependence plots can show how predicted CKD probability changes across A
 ```{r, message = FALSE}
 set.seed(123)
 
-pd <- partial(rf_adjusted, pred.var = c("alcohol_quantity", "SEX_factor"),
+pd <- partial(rf_adjusted, pred.var = c("alcohol_quantity", "sex"),
               which.class = 2, prob = TRUE, train = train,
               grid.resolution = 20)
 
-ggplot(pd, aes(alcohol_quantity, yhat, colour = SEX_factor)) +
+ggplot(pd, aes(alcohol_quantity, yhat, colour = sex)) +
   geom_smooth(se = FALSE, span = 0.6) +
   geom_rug(data = train, aes(x = alcohol_quantity), inherit.aes = FALSE, alpha = 0.1) +
   labs(x = "Alcohol quantity in last week", y = "Predicted probability of CKD",
@@ -547,20 +557,10 @@ set.seed(123)
 
 imp_data <- as.data.frame((randomForest::importance(rf_adjusted))) 
 
-rownames(imp_data)[rownames(imp_data) == "AGE"] <- "Age"
+rownames(imp_data)[rownames(imp_data) == "age"] <- "Age"
 rownames(imp_data)[rownames(imp_data) == "alcohol_quantity" ] <- "Alcohol Quantity"
-rownames(imp_data)[rownames(imp_data) == "SEX_factor" ] <- "Sex"
-rownames(imp_data)[rownames(imp_data) == "Red_wine" ] <- "Red Wine"
-rownames(imp_data)[rownames(imp_data) == "White_wine" ] <- "White Wine"
-rownames(imp_data)[rownames(imp_data) == "Full_strength_beer"] <- "Full Strength Beer"
-rownames(imp_data)[rownames(imp_data) == "Alcohol_risk_7day"] <- "7 day Alcohol Risk"
-rownames(imp_data)[rownames(imp_data) == "Champagne_sparkling_wine"] <- "Champagne/Sparkling Wine"
-rownames(imp_data)[rownames(imp_data) == "Mid_strength_beer"] <- "Mid Strength Beer"
-rownames(imp_data)[rownames(imp_data) == "Spirits_RTD"] <- "Ready to Drink Spirits"
-rownames(imp_data)[rownames(imp_data) == "Low_alcohol_beer"] <- "Low Alcohol Beer"
-rownames(imp_data)[rownames(imp_data) == "Fortified_wine"] <- "Fortified Wine"
-rownames(imp_data)[rownames(imp_data) == "Low_alcohol_wine"] <- "Low Alcohol wine"
-rownames(imp_data)[rownames(imp_data) == "Spirits_Liqueurs"] <- "Spirits and Liqueurs"
+rownames(imp_data)[rownames(imp_data) == "sex" ] <- "Sex"
+rownames(imp_data)[rownames(imp_data) == "spirits_Liqueurs"] <- "Spirits and Liqueurs"
 rownames(imp_data)[rownames(imp_data) == "ALC_freq_3"] <- "Frequency of alcohol consumption"
 
 imp_data$Variable <- rownames(imp_data)
