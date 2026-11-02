@@ -242,7 +242,7 @@ cd <- cooks.distance(model_int)
 ```
 
 ```{r,echo=FALSE}
-top7 <- order(cd, decreasing = TRUE)[1:5]
+top5 <- order(cd, decreasing = TRUE)[1:5]
 
 plot(
   1:length(cd), cd,
@@ -433,4 +433,33 @@ ggplot(plot_interaction,
 
 ```
 
+```{r}
+# smoking * sex, model 3 in the report, interaction
+model_smoking_interaction <- glm(ckd ~ age + smoker_status * sex + diabetes, data = ckd_data, family = binomial)
+```
+
+```{r}
+# smoking + sex, model 2, additive
+model_smoking_additive <- glm(ckd ~ age + smoker_status + sex + diabetes, data = ckd_data, family = binomial)
+```
+
+```{r}
+# no smoking, model 1, reduced
+model_smoking_reduced <- glm(ckd ~ age + sex + diabetes, data = ckd_data, family = binomial)
+```
+
+1. Smoking overall association
+```{r}
+anova(model_smoking_reduced, model_smoking_additive, test = "LRT")
+```
+
+2. Whether sex modifies the association
+```{r}
+anova(model_smoking_additive, model_smoking_interaction, test = "LRT")
+```
+
+3. Joint contribution of smoking and interaction
+```{r}
+anova(model_smoking_reduced, model_smoking_interaction,test = "LRT")
+```
 
