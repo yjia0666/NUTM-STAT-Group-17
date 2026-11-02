@@ -10,6 +10,7 @@ library(dplyr)
 library(stringr)
 library(tidyverse)
 library(here)
+
 ```
 
 ## Data cleaning
@@ -258,4 +259,52 @@ summary(model_int)
 ```
 
 
+## Method Descriptive Summaries 
 
+```{r}
+
+age_labels <- c("35-39", "40-44", "45-49", "50-54", "55-59", "60-64",
+                "65-69", "70-74", "75-79", "80-84", "85+")
+
+plot_data <- df_filter %>%
+  mutate(
+    AgeGroup = cut(age,
+                   breaks = c(34, 39, 44, 49, 54, 59, 64, 69, 74, 79, 84, Inf),
+                   labels = age_labels, right = TRUE),
+    Sex = factor(sex)
+  ) %>%
+  filter(!is.na(AgeGroup)) %>%
+  count(Sex, AgeGroup) %>%
+  mutate(
+    Proportion     = n / sum(n),                        
+    PlotProportion = ifelse(Sex == "Male", -Proportion, Proportion)
+  )
+
+lim <- ceiling(max(plot_data$Proportion) * 100) / 100   # symmetric axis from the data
+
+p_pyramid <- ggplot(plot_data, aes(x = AgeGroup, y = PlotProportion, fill = Sex)) +
+  geom_col(width = 0.85) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = function(x) paste0(abs(x) * 100, "%"),
+    limits = c(-lim, lim)
+  ) +
+  scale_fill_manual(values = c("Male" = "steelblue2", "Female" = "tomato1")) +
+  labs(
+    title = "Age and sex structure of the study population",
+    x = "Age group (years)",
+    y = "% of all respondents",
+    fill = "Sex"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+p_pyramid
+ggsave(here("figures", "age_sex_pyramid.png"), plot = p_pyramid,
+       width = 7, height = 5, dpi = 300)
+
+```

@@ -196,8 +196,71 @@ gt(random_model$bestTune) |> tab_header(title = md("Best Hyperparameters from **
 
 ```
 
-Random Search finds that a minimum node size of 14 is the optimal value, typically suggesting the model currently overfits at lower values with the minimum node size as 1. To see if 14 is truly optimal, a focused GridSearch can be done to search around that range. 
+Random Search finds that a minimum node size of 18 is the optimal value, typically suggesting the model currently overfits at lower values with the minimum node size as 1. To see if 18 is truly optimal, a focused GridSearch can be done to search around that range. 
 
+### Focused Grid Search - Accuracy
+
+
+```{r}
+set.seed(123)
+
+# Define a standard CV control 
+final_control <- trainControl(
+  method = "cv",
+  number = 5
+)
+
+preProcObj <- preProcess(train, method = c('center', 'scale')) #Prevents data leakage
+df_train <- predict(preProcObj, train)
+df_test <- predict(preProcObj, test)
+
+# Define a tight grid around the minimum node size of 18
+fine_tune_grid <- expand.grid(
+  mtry = 3, # Keeping other best random search parameters fixed
+  min.node.size = c(12, 14, 16, 18, 20, 22, 24, 26), 
+  splitrule = "gini" 
+)
+
+# Running the final grid search
+final_model <- train(
+  ckd ~ ., 
+  data = df_train,
+  method = "ranger", 
+  trControl = final_control,
+  tuneGrid = fine_tune_grid
+)
+
+```
+
+```{r}
+set.seed(123)
+
+final_model_table <- final_model$results #Extracting the results of the final grid search
+clean_table <- final_model_table %>% gt()
+clean_table |> tab_header(title = md("Focused Grid Search Results"))
+
+pred_class <- predict(final_model, df_test)
+
+CM_randomsearch <- confusionMatrix(pred_class, test$ckd, positive = "CKD") # Confusion Matrix
+cm_randomsearch <- as.data.frame(CM_randomsearch$table)
+
+# Plotting Confusion Matrix with high aesthetics
+
+ggplot(data = cm_randomsearch, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white", lwd = 1, linetype = 1) +  
+  geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + 
+  scale_fill_gradient(low = "steelblue1", high = "steelblue3") + 
+  labs(
+    title = "Focused Grid Search Random Forest Performance",
+    subtitle = paste0("Overall Accuracy: ", round(CM_randomsearch$overall['Accuracy'] * 100, 2), "%"),
+    x = "Actual Classes",
+    y = "Predicted Classes"
+  ) +
+  theme_minimal(base_size = 14) 
+
+```
+
+By testing minimum node sizes around 18 at a constant mtry, an almost flat accuracy of 0.88 may indicate that accuracy is the wrong metric to look at for imbalanced data. From the confusion matrix, the model is mostly predicting No CKD, so tuning hyper parameters based of  optimising sensitivity would be better. 
 ### Focused Grid Search - Sensitivity
 
 
@@ -214,8 +277,8 @@ ctrl <- trainControl(
 fit <- train(
   ckd ~ ., data = train, method = "ranger",
   metric = "ROC", trControl = ctrl,
-  tuneGrid = expand.grid(mtry = c(6, 7, 8, 9, 10),
-                         min.node.size = c(1, 12, 13, 14, 15, 16, 17, 18),
+  tuneGrid = expand.grid(mtry = c(1, 2, 3, 4, 5),
+                         min.node.size = c(1, 15, 16, 17, 18, 19, 20, 21),
                          splitrule = "gini")
 )
 
@@ -232,7 +295,7 @@ fit$results %>%
   cols_label(Spec = "Sensitivity", Sens = "Specificity") %>%
   tab_header(title = "Combination of Hyper parameters which leads to highest Sensitivity")
 
-chosen <- fit$results %>% filter(mtry == 5, min.node.size == 12)   # The final combination
+chosen <- fit$results %>% filter(mtry == 3, min.node.size == 18)   # The final combination
 
 names <- c("Initial balanced RF", "Final RF")
 
@@ -243,7 +306,7 @@ sens_table <- data.frame(Name = names,
 
 ```
 
-The best hyper-parametric combination appears to be mtry of 5 with a min.node.size of 16, which gave the highest sensitivity of 0.6560354. The ROC 0.7195007 means there is acceptable discrimination.
+The best hyper-parametric combination appears to be mtry of 3 with a min.node.size of 18, which gave the highest sensitivity of 0.7527885. The ROC 0.7621836 means there is acceptable discrimination.
 
 ## Adjusted Random Forest 
 
@@ -255,7 +318,7 @@ rf_adjusted <- randomForest(
   ntree = 500, importance = TRUE,
   strata = train$ckd,
   mtry = 3,
-  nodesize = 12,
+  nodesize = 18,
   sampsize = c(n_min, n_min)
 ) # The OOB error and class-specific errors are trustworthy here
 
@@ -273,7 +336,7 @@ ggplot(data = cm_adjusted, aes(x = Reference, y = Prediction, fill = Freq)) +
   scale_fill_gradient(low = "aquamarine1", high = "aquamarine3") + 
   labs(
     title = "Random Forest Performance of Adjusted Random Forest",
-    subtitle = paste0("Overall Accuracy: ", round(CM_adjusted$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_balanced$err.rate[nrow(rf_balanced$err.rate), "OOB"] * 100, 2), "%"),
+    subtitle = paste0("Overall Accuracy: ", round(CM_adjusted$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_adjusted$err.rate[nrow(rf_adjusted$err.rate), "OOB"] * 100, 2), "%"),
     x = "Actual Classes",
     y = "Predicted Classes"
   ) +
@@ -293,7 +356,7 @@ class_errors
 ```{r, message = 'false'}
 roc_obj <- roc(test$ckd, pred_prob)
 auc_value_adjusted <- auc(roc(test$ckd, pred_prob, levels = c("No_CKD", "CKD"), direction = "<"))  
-plot(roc_obj, main = paste("Area under Curve of the Adjusted Random Forest is", round(auc_value_adjusted, 3)), col = "aquamarine4")
+plot(roc_obj, main = paste("Area under Curve of the Adjusted Random Forest is", round(auc_value_adjusted, 3)), col = "steelblue4")
 
 
 ```
@@ -346,7 +409,7 @@ rf_nosex <- randomForest(
   ntree = 500, importance = TRUE,
   strata = train_ns$ckd,
   mtry = 3,
-  nodesize = 12,
+  nodesize = 18,
   sampsize = c(n_min, n_min) # Down-sampling the majority class
 )
 
@@ -367,7 +430,7 @@ cm_nosex <- as.data.frame(CM_nosex$table)
 ggplot(data = cm_nosex, aes(x = Reference, y = Prediction, fill = Freq)) +
   geom_tile(color = "white", lwd = 1, linetype = 1) +  # Creates clear tile borders
   geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + # Large, bold numbers
-  scale_fill_gradient(low = "darkseagreen2", high = "darkseagreen3") + # Sleek blue gradient theme
+  scale_fill_gradient(low = "steelblue1", high = "steelblue3") + # Sleek blue gradient theme
   labs(
     title = "Random Forest without 'Sex' Performance",
     subtitle = paste0("Overall Accuracy: ", round(CM_nosex$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_nosex$err.rate[nrow(rf_nosex$err.rate), "OOB"] * 100, 2), "%"), 
@@ -389,7 +452,7 @@ class_errors
 roc_obj_nosex <- (roc(test_ns$ckd, pred_prob_nosex, levels = c("No_CKD", "CKD"), direction = "<"))  
 auc_valuenosex <- auc(roc_obj_nosex)
 
-plot(roc_obj_nosex, main = paste("Area under Curve of Random Forest without 'sex' is", round(auc_valuenosex, 3)), col="darkseagreen3")
+plot(roc_obj_nosex, main = paste("Area under Curve of Random Forest without 'sex' is", round(auc_valuenosex, 3)), col="steelblue")
 
 sens <- sensitivity(pred_class_nosex, test_ns$ckd) #Sensitivity value of no sex RF
 
@@ -498,7 +561,7 @@ ggplot(imp_long, aes(x = reorder(Variable, Importance), y = Importance)) +
     x = NULL,
     y = "Importance Metric Score"
   )  +
-  theme(strip.background = element_rect(fill = "dodgerblue3", colour = "white"),
+  theme(strip.background = element_rect(fill = "steelblue", colour = "white"),
     strip.text = element_text(face = "bold", size = 12),
     panel.spacing = unit(2, "lines")
   )
