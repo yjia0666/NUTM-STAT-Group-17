@@ -78,12 +78,25 @@ smoke_vars <- c("smoker_current", "smoker_ex")
 stopifnot(!any(c("eGFR_range", "Alcohol_risk", "Alcohol_risk_7day") %in% colnames(X)))
 stopifnot(!anyNA(X), !anyNA(y), all(y %in% 0:1))
 
-labels <- c(male = "Male sex", AGE = "Age (years)",
-            alcohol_quantity = "Alcohol, std drinks/day (last week)",
-            ALC_freq_3 = "Days with 3+ drinks (past year, code)",
-            smoker_current = "Current smoker", smoker_ex = "Ex-smoker",
-            diabetes = "Diabetes",
-            setNames(gsub("_", " ", bev_cols), bev_cols))
+# Plot labels, capitalised to match the other models' figures
+labels <- c(AGE = "Age", male = "Sex", diabetes = "Diabetes",
+            alcohol_quantity = "Alcohol Quantity",
+            ALC_freq_3 = "Alcohol Frequency",
+            low_alcohol_beer = "Low Alcohol Beer", mid_strength_beer = "Mid Strength Beer",
+            full_strength_beer = "Full Strength Beer", white_wine = "White Wine",
+            red_wine = "Red Wine", low_alcohol_wine = "Low Alcohol Wine",
+            champagne_sparkling_wine = "Champagne and Sparkling Wine",
+            spirits_rtd = "Pre-mixed Spirits", liqueurs = "Liqueurs",
+            spirits = "Spirits", fortified_wine = "Fortified Wine",
+            cider = "Cider", cocktails = "Cocktails",
+            smoker_current = "Current Smoker", smoker_ex = "Ex-Smoker")
+
+# Order for the importance plot: demographics and health first, then alcohol, then smoking
+var_order <- c("AGE", "male", "diabetes", "alcohol_quantity", "ALC_freq_3", bev_cols,
+               "smoker_current", "smoker_ex")
+
+# Sex colours shared with the random forest figures
+sex_cols <- c(Female = "tomato", Male = "steelblue")
 
 sample_tab <- data.frame(
   Group = c("All", "Female", "Male"),
@@ -290,11 +303,15 @@ imp <- sort(colMeans(abs(S)), decreasing = TRUE)
 
 ```{r shap-bar, fig.cap="Figure 1. Mean absolute SHAP value per variable (importance on the log-odds scale). XGBoost, n = all adults 35+. Correlated beverage columns share credit, so individual beverage bars understate beverage type as a whole (see Table 4)."}
 imp_df <- data.frame(var = names(imp), importance = imp) %>%
-  slice_head(n = 12) %>%
-  mutate(label = factor(labels[var], levels = rev(labels[var])))
+  slice_head(n = 12) %>%                                   # 12 most important variables
+  mutate(var = factor(var, levels = c(setdiff(var_order, bev_cols)[1:5],           # Age, Sex, Diabetes, Quantity, Frequency
+                                      bev_cols[order(-imp[bev_cols])],             # beverages, most important first
+                                      smoke_vars))) %>%                            # then smoking
+  arrange(var) %>%
+  mutate(label = factor(labels[as.character(var)], levels = rev(labels[as.character(var)])))
 ggplot(imp_df, aes(importance, label)) +
-  geom_col(fill = "#4C78A8") +
-  labs(x = "Mean |SHAP| (log-odds)", y = NULL) +
+  geom_col(fill = "steelblue") +
+  labs(x = "Mean |SHAP| (Log-Odds)", y = NULL) +
   theme_minimal(base_size = 12)
 ```
 
@@ -311,7 +328,7 @@ ggplot(long, aes(shap, label, colour = value)) +
   geom_jitter(height = 0.22, size = 0.7, alpha = 0.6) +
   scale_colour_gradient(low = "#4C78A8", high = "#E45756", name = "Feature value",
                         breaks = c(0.1, 0.9), labels = c("low", "high")) +
-  labs(x = "SHAP value (impact on CKD log-odds)", y = NULL) +
+  labs(x = "SHAP Value (Impact on CKD Log-Odds)", y = NULL) +
   theme_minimal(base_size = 12)
 ```
 
@@ -343,9 +360,11 @@ ggplot(sh, aes(alcohol, shap, colour = Sex, fill = Sex)) +
   geom_hline(yintercept = 0, colour = "grey60") +
   geom_point(alpha = 0.25, size = 0.8) +
   geom_smooth(method = "loess", span = 0.9, se = TRUE, alpha = 0.15) +
+  scale_colour_manual(values = sex_cols) +
+  scale_fill_manual(values = sex_cols) +
   coord_cartesian(xlim = c(0, quantile(sh$alcohol, 0.98))) +
-  labs(x = "Alcohol, standard drinks per day (last week)",
-       y = "SHAP value for alcohol quantity") +
+  labs(x = "Alcohol Quantity (standard drinks per day, last week)",
+       y = "SHAP Value for Alcohol Quantity") +
   theme_minimal(base_size = 12)
 ```
 
