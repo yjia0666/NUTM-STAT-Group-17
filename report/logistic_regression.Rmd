@@ -512,39 +512,21 @@ anova(model_smoking_reduced, model_smoking_interaction,test = "LRT")
 
 ## Menopause
 ```{r}
-model_menopause <- glm(ckd ~ age + alcohol_quantity * menopause + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data_filter, family = binomial)
+model_menopause <- glm(ckd ~ age + alcohol_quantity * menopause + alcohol_frequency + diabetes, data = ckd_data_filter, family = binomial)
 summary(model_menopause)
 ```
-
 ```{r}
-model_summary_menopause <- summary(model_menopause)$coefficients
-
-results_pretty <- data.frame(
-  Variable = rownames(model_summary_menopause),
-
-  OR = exp(model_summary_menopause[, "Estimate"]),
-
-  `95% CI` = paste0(
-    sprintf("%.2f", exp(model_summary_menopause[, "Estimate"] -
-                         1.96 * model_summary_menopause[, "Std. Error"])),
-    "–",
-    sprintf("%.2f", exp(model_summary_menopause[, "Estimate"] +
-                         1.96 * model_summary_menopause[, "Std. Error"]))
-  ),
-
-  `P-value` = ifelse(
-    model_summary_menopause[, "Pr(>|z|)"] < 0.001,
-    "<0.001",
-    sprintf("%.3f", model_summary_menopause[, "Pr(>|z|)"])
-  ),
-
-  check.names = FALSE
+effect_female <- subset(
+  effect_data_female,
+  group == "Female"
+)
+effect_data_menopause <- ggpredict(
+  model_menopause,
+  terms = c("alcohol_quantity", "menopause")
 )
 
-results_pretty$OR <- sprintf("%.2f", results_pretty$OR)
-
-print(results_pretty, row.names = FALSE)
 ```
+
 
 ```{r}
 effect_data_menopause <- ggpredict(
@@ -560,15 +542,15 @@ ggplot(effect_data_menopause, aes(x = x, y = predicted,
               alpha = 0.15, colour = NA) +
 
   scale_colour_manual(
-    values = c("1" = "tomato1",
-               "0" = "steelblue2"),
+    values = c("1" = "purple",
+               "0" = "pink"),
     labels = c("1" = "Post-menopause",
                "0" = "Other")
   ) +
 
   scale_fill_manual(
-    values = c("1" = "tomato1",
-               "0" = "steelblue2"),
+    values = c("1" = "purple",
+               "0" = "pink"),
     labels = c("1" = "Post-menopause",
                "0" = "Other")
   ) +
@@ -582,10 +564,6 @@ ggplot(effect_data_menopause, aes(x = x, y = predicted,
   ) +
   theme_minimal(base_size = 13)
 ggsave("../figures/effect_menopause.png")
-```
-
-```{r}
-
 ```
 
 
