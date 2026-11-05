@@ -12,10 +12,10 @@ nocite: '@*'
 library(dplyr)
 library(emmeans)
 library(car)
-library(dagitty)
 library(knitr)
 library(kableExtra)
 library(ggplot2)
+library(ggeffects)
 ```
 
 ```{r}
@@ -79,10 +79,11 @@ variable_overview <- tibble::tibble(
     "Cider",
     "Cocktails",
     "Sex",
-    "Age"
+    "Age",
+    "Diabetes"
   ),
   Description = c(
-    "Chronic kidney disease status (0 = No, 1 = Yes)",
+    "Chronic kidney disease status (0 = No, 1 = Yes; based on recorded CKD stages)",
     "Number of standard drinks consumed in the last week",
     "Number of days per week consuming three or more drinks in a day over the past 12 months",
     "Whether beer was consumed in the last week (0 = No, 1 = Yes)",
@@ -91,7 +92,8 @@ variable_overview <- tibble::tibble(
     "Whether cider was consumed in the last week (0 = No, 1 = Yes)",
     "Whether cocktail was consumed in the last week (0 = No, 1 = Yes)",
     "Participant sex",
-    "Participant age"
+    "Participant age",
+    "Diabetes prevalence (0 = No, 1 = Yes; based on HbA1c levels)"
   ),
 
   Type = c(
@@ -104,7 +106,8 @@ variable_overview <- tibble::tibble(
     "Binary categorical",
     "Binary categorical",
     "Binary categorical",
-    "Numeric"
+    "Numeric",
+    "Binary categorical"
   ),
 
   Role = c(
@@ -117,20 +120,26 @@ variable_overview <- tibble::tibble(
     "Additional alcohol-related predictor",
     "Additional alcohol-related predictor",
     "Effect modifier",
+    "Potential confounder",
     "Potential confounder"
   )
 )
 
-variable_overview |>
+latex_table <- variable_overview |>
   kable(
     caption = "Overview of Study Variables",
     align = "l",
-    booktabs = TRUE
-  ) |>
-  kable_styling(
-    bootstrap_options = c("striped", "hover", "condensed"),
-    full_width = FALSE,
-    position = "left"
+    booktabs = TRUE,
+    format ="latex"
+  )
+cat(latex_table)
+```
+
+```{r}
+ckd_data_filter <- ckd_data %>%
+  filter(
+    sex == "Female",
+    !is.na(menopause)
   )
 ```
 
@@ -163,7 +172,7 @@ plot(
   xlab = "Alcohol quantity",
   ylab = "Linear predictor (logit)",
   pch = 16,
-  col = "gray50",
+  col = "gray20",
   cex = 0.5
 )
 
@@ -172,7 +181,7 @@ lines(
     ckd_data$alcohol_quantity,
     model_int$linear.predictors
   ),
-  col = "steelblue",
+  col = "steelblue2",
   lwd = 2
 )
 ```
@@ -185,7 +194,7 @@ plot(
   xlab = "Age",
   ylab = "Linear predictor (logit)",
   pch = 16,
-  col = "gray50",
+  col = "gray20",
   cex = 0.5
 )
 
@@ -194,7 +203,7 @@ lines(
     ckd_data$age,
     model_int$linear.predictors
   ),
-  col = "steelblue",
+  col = "steelblue2",
   lwd = 2
 )
 ```
@@ -207,7 +216,7 @@ plot(
   xlab = "Alcohol frequency",
   ylab = "Linear predictor (logit)",
   pch = 16,
-  col = "gray50",
+  col = "gray20",
   cex = 0.5
 )
 
@@ -216,7 +225,7 @@ lines(
     ckd_data$alcohol_frequency,
     model_int$linear.predictors
   ),
-  col = "steelblue",
+  col = "steelblue2",
   lwd = 2
 )
 ```
@@ -274,8 +283,8 @@ text(
 ```
 
 ```{r,echo=FALSE}
-top8_cd <- sort(cd, decreasing = TRUE)[1:8]
-round(top8_cd, 4)
+top7_cd <- sort(cd, decreasing = TRUE)[1:7]
+round(top7_cd, 4)
 ```
 Influential observations were assessed using Cook's distance. Several observations had relatively higher Cook's distances, the maximum value was 0.103. 
 
@@ -321,8 +330,6 @@ results_pretty <- data.frame(
                          1.96 * model_summary[, "Std. Error"]))
   ),
 
-  SE = sprintf("%.3f", model_summary[, "Std. Error"]),
-
   `P-value` = ifelse(
     model_summary[, "Pr(>|z|)"] < 0.001,
     "<0.001",
@@ -355,8 +362,8 @@ ggplot(plot_data,
   geom_vline(xintercept = 1, linetype = "dashed",
              color = "grey50") +
   geom_errorbarh(aes(xmin = Lower, xmax = Upper),
-                 height = 0.2, color = "steelblue") +
-  geom_point(size = 3, color = "steelblue") +
+                 height = 0.2, color = "steelblue2") +
+  geom_point(size = 3, color = "steelblue2") +
   scale_x_log10() +
   labs(
     title = "Association between Covariates and CKD",
@@ -364,6 +371,7 @@ ggplot(plot_data,
     y = NULL
   ) +
   theme_minimal(base_size = 12)
+ggsave("../figures/forest_plot_all.png")
 ```
 
 ```{r, echo=FALSE}
@@ -406,7 +414,7 @@ plot_interaction <- data.frame(
 
 # Plot
 ggplot(plot_interaction,
-       aes(x = OR, y = Sex)) +
+       aes(x = OR, y = Sex, color = Sex)) +
   geom_vline(
     xintercept = 1,
     linetype = "dashed",
@@ -416,26 +424,65 @@ ggplot(plot_interaction,
     aes(xmin = Lower, xmax = Upper),
     orientation = "y",
     width = 0.2,
-    color = "steelblue",
     linewidth = 0.8
   ) +
-  geom_point(
-    color = "steelblue",
-    size = 3
+  geom_point(size = 3) +
+  scale_color_manual(
+    values = c(
+      "Male" = "steelblue2",
+      "Female" = "tomato1"
+    )
   ) +
   scale_x_log10() +
   labs(
     title = "Association between Alcohol Quantity and CKD by Sex",
     x = "Odds Ratio (95% CI)",
-    y = "Sex"
+    y = "Sex",
+    color = "Sex"
   ) +
   theme_classic(base_size = 12)
-
+ggsave("../figures/forest_plot_sex.png")
 ```
+
+```{r}
+effect_data <- ggpredict(
+  model_int,
+  terms = c("alcohol_quantity", "sex")
+)
+
+# Plot
+ggplot(effect_data, aes(x = x, y = predicted,
+                        colour = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+              alpha = 0.15, colour = NA) +
+  
+  scale_colour_manual(
+    values = c("Female" = "tomato1",
+               "Male" = "steelblue2")
+  ) +
+
+  scale_fill_manual(
+    values = c("Female" = "tomato1",
+               "Male" = "steelblue2")
+  ) +
+  
+  labs(
+    x = "Alcohol quantity (standard drinks per week)",
+    y = "Predicted probability of CKD",
+    colour = "Sex",
+    fill = "Sex",
+    title = "Interaction Effect of Alcohol Quantity and Sex on CKD"
+  ) +
+  theme_minimal(base_size = 13)
+ggsave("../figures/effect_plot.png")
+```
+
 
 ```{r}
 # smoking * sex, model 3 in the report, interaction
 model_smoking_interaction <- glm(ckd ~ age + smoker_status * sex + diabetes, data = ckd_data, family = binomial)
+summary(model_smoking_interaction)
 ```
 
 ```{r}
@@ -462,4 +509,42 @@ anova(model_smoking_additive, model_smoking_interaction, test = "LRT")
 ```{r}
 anova(model_smoking_reduced, model_smoking_interaction,test = "LRT")
 ```
+
+## Menopause
+```{r}
+model_menopause <- glm(ckd ~ age + alcohol_quantity + menopause + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data_filter, family = binomial)
+summary(model_menopause)
+```
+
+```{r}
+model_summary_menopause <- summary(model_menopause)$coefficients
+
+results_pretty <- data.frame(
+  Variable = rownames(model_summary_menopause),
+
+  OR = exp(model_summary_menopause[, "Estimate"]),
+
+  `95% CI` = paste0(
+    sprintf("%.2f", exp(model_summary_menopause[, "Estimate"] -
+                         1.96 * model_summary_menopause[, "Std. Error"])),
+    "–",
+    sprintf("%.2f", exp(model_summary_menopause[, "Estimate"] +
+                         1.96 * model_summary_menopause[, "Std. Error"]))
+  ),
+
+  `P-value` = ifelse(
+    model_summary_menopause[, "Pr(>|z|)"] < 0.001,
+    "<0.001",
+    sprintf("%.3f", model_summary_menopause[, "Pr(>|z|)"])
+  ),
+
+  check.names = FALSE
+)
+
+results_pretty$OR <- sprintf("%.2f", results_pretty$OR)
+
+print(results_pretty, row.names = FALSE)
+```
+
+
 

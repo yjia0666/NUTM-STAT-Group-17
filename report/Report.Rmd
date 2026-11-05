@@ -20,7 +20,7 @@ df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
 
 df <- df1 %>%
-  dplyr::select(ABSLID, ABSPID, SEX, SMKSTAT, ALCF3, AGEB, ALINWKSD) %>%
+  dplyr::select(ABSLID, ABSPID, SEX, SMKSTAT, ALCF3, AGEB, ALINWKSD, FEMLSBC) %>%
   filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
   left_join(
       df2 %>%
@@ -88,6 +88,11 @@ ckd_data <- df %>%
       DIABPRVE %in% c(0, 8) ~ NA_real_,
       DIABPRVE %in% c(1, 2) ~ 1,
       DIABPRVE %in% c(3, 4) ~ 0
+    ),
+    menopause = case_when(
+      FEMLSBC %in% c(1:4, 6) ~ 0,
+      FEMLSBC == 5 ~ 1,
+      FEMLSBC == 9 ~ NA_real_
     )
   )
 ```
@@ -180,6 +185,10 @@ df_filter <- df_final %>%
     ),
     diabetes = factor(
       diabetes,
+      levels = c(0, 1)
+    ),
+    menopause = factor(
+      menopause,
       levels = c(0, 1)
     ),
     across(
