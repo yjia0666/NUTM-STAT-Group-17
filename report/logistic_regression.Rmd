@@ -143,6 +143,10 @@ ckd_data_filter <- ckd_data %>%
   )
 ```
 
+```{r}
+table(ckd_data$sex, ckd_data$menopause, cut(ckd_data$age, c(37,42,47,52,57, 62, 67,72, 77,82,85)))
+
+```
 
 # Logistic Regression
 ## Model Specification

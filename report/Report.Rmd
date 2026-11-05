@@ -90,9 +90,9 @@ ckd_data <- df %>%
       DIABPRVE %in% c(3, 4) ~ 0
     ),
     menopause = case_when(
-      FEMLSBC %in% c(1:4, 6) ~ 0,
-      FEMLSBC == 5 ~ 1,
-      FEMLSBC == 9 ~ NA_real_
+      FEMLSBC %in% c(1:3) ~ 0,
+      FEMLSBC == c(4,5) ~ 1,
+      FEMLSBC == c(6,9) ~ NA_real_
     )
   )
 ```
