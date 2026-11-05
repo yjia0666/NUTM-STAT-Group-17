@@ -512,7 +512,7 @@ anova(model_smoking_reduced, model_smoking_interaction,test = "LRT")
 
 ## Menopause
 ```{r}
-model_menopause <- glm(ckd ~ age + alcohol_quantity + menopause + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data_filter, family = binomial)
+model_menopause <- glm(ckd ~ age + alcohol_quantity * menopause + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data_filter, family = binomial)
 summary(model_menopause)
 ```
 
@@ -546,5 +546,46 @@ results_pretty$OR <- sprintf("%.2f", results_pretty$OR)
 print(results_pretty, row.names = FALSE)
 ```
 
+```{r}
+effect_data_menopause <- ggpredict(
+  model_menopause,
+  terms = c("alcohol_quantity", "menopause")
+)
+
+# Plot
+ggplot(effect_data_menopause, aes(x = x, y = predicted,
+                        colour = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+              alpha = 0.15, colour = NA) +
+
+  scale_colour_manual(
+    values = c("1" = "tomato1",
+               "0" = "steelblue2"),
+    labels = c("1" = "Post-menopause",
+               "0" = "Other")
+  ) +
+
+  scale_fill_manual(
+    values = c("1" = "tomato1",
+               "0" = "steelblue2"),
+    labels = c("1" = "Post-menopause",
+               "0" = "Other")
+  ) +
+
+  labs(
+    x = "Alcohol quantity (standard drinks per week)",
+    y = "Predicted probability of CKD",
+    colour = "Menopause status",
+    fill = "Menopause status",
+    title = "Interaction Effect of Alcohol Quantity and Menopause Status on CKD"
+  ) +
+  theme_minimal(base_size = 13)
+ggsave("../figures/effect_menopause.png")
+```
+
+```{r}
+
+```
 
 
