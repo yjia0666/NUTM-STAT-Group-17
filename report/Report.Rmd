@@ -13,6 +13,9 @@ library(here)
 library(mgcv)
 library(ggplot2)
 library(emmeans)
+library(ggeffects)
+library(car)
+library(knitr)
 
 ```
 
@@ -830,3 +833,449 @@ ggsave(here("figures", "age_sex_pyramid.png"), plot = p_pyramid,
        width = 7, height = 5, dpi = 300)
 
 ```
+
+## XGBoost
+
+```{r xgb-setup}
+# install.packages(c("xgboost", "dplyr", "tidyr", "ggplot2", "here", "knitr"))
+library(xgboost)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(here)
+library(knitr)
+
+set.seed(2026)   # same seed as the standalone XGBoost Rmds
+# ---- switches ---------------------------------------------------------------
+data_file  <- here("report", "shared_df_filter.rds")   # shared report data; here() finds it from the project root
+save_folds <- FALSE   # TRUE writes Rcode/cv_folds_ckd.rds so the random forest can reuse identical folds
+n_rep      <- 5       # repeats of stratified k-fold CV
+k_fold     <- 5
+n_threads  <- 2
+```
+
+### Aim
+
+Use gradient-boosted trees (XGBoost) to ask two questions about CKD in adults aged 35+:
+
+1. Does alcohol intake help predict CKD, and **does sex modify that relationship**?
+2. Secondary: does sex modify the **smoking**–CKD relationship?
+
+XGBoost can pick up non-linear effects and interactions that the logistic regression and GAM cannot, so it is used here as a flexible check on those models. All results are **associations**, not causal effects.
+
+### 1. Data
+
+```{r xgb-data}
+df <- readRDS(data_file)
+
+# Outcome: CKD = 1 if EGFRKDSA stage 1-6, 0 if no indicators of CKD
+y <- as.integer(as.character(df$ckd))
+
+# Predictors. Everything is numeric so SHAP values are easy to read.
+as01 <- function(f) as.integer(as.character(f))
+
+bev_cols <- c("low_alcohol_beer", "mid_strength_beer", "full_strength_beer",
+              "white_wine", "red_wine", "low_alcohol_wine",
+              "champagne_sparkling_wine", "spirits_rtd", "liqueurs",
+              "spirits", "fortified_wine", "cider", "cocktails")
+
+X <- data.frame(
+  male             = as.integer(df$sex == "Male"),
+  AGE              = df$age,
+  alcohol_quantity = df$alcohol_quantity,   # std drinks/day, last week
+  ALC_freq_3       = df$alcohol_frequency,         # ordinal survey code, days with 3+ drinks in past year
+  smoker_current   = as.integer(df$smoker_status == "Current smoker"),
+  smoker_ex        = as.integer(df$smoker_status == "Ex-smoker"),
+  diabetes         = as01(df$diabetes)          # self-reported diabetes diagnosis (1 = yes)
+)
+X[bev_cols] <- lapply(df[bev_cols], as01)
+X <- as.matrix(X)
+
+alc_vars   <- c("alcohol_quantity", "ALC_freq_3", bev_cols)
+smoke_vars <- c("smoker_current", "smoker_ex")
+
+# Columns that must NOT be predictors:
+#  - eGFR_range: CKD is defined from eGFR/ACR, so it leaks the outcome
+#    (every person with eGFR < 60 is coded CKD).
+#  - Alcohol_risk / Alcohol_risk_7day: derived from alcohol_quantity.
+stopifnot(!any(c("eGFR_range", "Alcohol_risk", "Alcohol_risk_7day") %in% colnames(X)))
+stopifnot(!anyNA(X), !anyNA(y), all(y %in% 0:1))
+
+# Plot labels, capitalised to match the other models' figures
+labels <- c(AGE = "Age", male = "Sex", diabetes = "Diabetes",
+            alcohol_quantity = "Alcohol Quantity",
+            ALC_freq_3 = "Alcohol Frequency",
+            low_alcohol_beer = "Low Alcohol Beer", mid_strength_beer = "Mid Strength Beer",
+            full_strength_beer = "Full Strength Beer", white_wine = "White Wine",
+            red_wine = "Red Wine", low_alcohol_wine = "Low Alcohol Wine",
+            champagne_sparkling_wine = "Champagne and Sparkling Wine",
+            spirits_rtd = "Pre-mixed Spirits", liqueurs = "Liqueurs",
+            spirits = "Spirits", fortified_wine = "Fortified Wine",
+            cider = "Cider", cocktails = "Cocktails",
+            smoker_current = "Current Smoker", smoker_ex = "Ex-Smoker")
+
+# Order for the importance plot: demographics and health first, then alcohol, then smoking
+var_order <- c("AGE", "male", "diabetes", "alcohol_quantity", "ALC_freq_3", bev_cols,
+               "smoker_current", "smoker_ex")
+
+# Sex colours shared with the random forest figures
+sex_cols <- c(Female = "tomato", Male = "steelblue")
+
+sample_tab <- data.frame(
+  Group = c("All", "Female", "Male"),
+  n     = c(length(y), sum(X[, "male"] == 0), sum(X[, "male"] == 1)),
+  CKD   = c(sum(y), sum(y[X[, "male"] == 0]), sum(y[X[, "male"] == 1]))
+)
+sample_tab$`CKD %` <- round(100 * sample_tab$CKD / sample_tab$n, 1)
+kable(sample_tab, caption = "Analysis sample: adults aged 35+ with complete data (shared_df_filter.rds).")
+```
+
+**Sample note.** The shared data frame only keeps people with a recorded beverage type, i.e. people who drank in the survey week (only a handful of rows have zero alcohol). There is therefore no non-drinker reference group, and alcohol effects are read *within last-week drinkers*. This should be listed as a limitation.
+
+**Diabetes.** Diabetes (self-reported diagnosis) is included as a predictor because it is a major cause of CKD. It could also sit on the path from heavy drinking to CKD, so adjusting for it may hide part of alcohol's effect. Results should be read with that in mind.
+
+### 2. Cross-validation set-up
+
+Folds are stratified on CKD × sex so every fold keeps the (small) number of female CKD cases. The same folds are used for every model, so differences between models are not due to different splits.
+
+```{r xgb-folds}
+make_folds <- function(y, strata, k = 5, reps = 5, seed = 1) {
+  set.seed(seed)
+  lapply(seq_len(reps), function(r) {
+    fold_id <- integer(length(y))
+    for (s in unique(strata)) {
+      idx <- which(strata == s)
+      fold_id[idx] <- sample(rep_len(seq_len(k), length(idx)))
+    }
+    lapply(seq_len(k), function(f) which(fold_id == f))  # list of test-index vectors
+  })
+}
+
+strata  <- paste(y, X[, "male"])
+folds   <- make_folds(y, strata, k = k_fold, reps = n_rep)
+if (save_folds) saveRDS(folds, here("Rcode", "cv_folds_ckd.rds"))
+
+# Metrics. Accuracy is deliberately not used: predicting "no CKD" for everyone is ~89% accurate.
+auc_fn <- function(y, p) {           # Mann-Whitney form of ROC-AUC
+  r <- rank(p); n1 <- sum(y == 1); n0 <- sum(y == 0)
+  (sum(r[y == 1]) - n1 * (n1 + 1) / 2) / (n1 * n0)
+}
+ap_fn <- function(y, p) {            # average precision (PR-AUC)
+  o <- order(p, decreasing = TRUE); yo <- y[o]
+  mean((cumsum(yo) / seq_along(yo))[yo == 1])
+}
+ll_fn    <- function(y, p) { p <- pmin(pmax(p, 1e-6), 1 - 1e-6); -mean(y * log(p) + (1 - y) * log(1 - p)) }
+brier_fn <- function(y, p) mean((y - p)^2)
+
+# Run any model through the repeated CV; returns pooled out-of-fold metrics per repeat.
+cv_eval <- function(fit_predict) {
+  do.call(rbind, lapply(seq_along(folds), function(r) {
+    oof <- numeric(length(y))
+    for (te in folds[[r]]) {
+      tr <- setdiff(seq_along(y), te)
+      oof[te] <- fit_predict(X[tr, , drop = FALSE], y[tr], X[te, , drop = FALSE])
+    }
+    data.frame(rep = r, AUC = auc_fn(y, oof), PR_AUC = ap_fn(y, oof),
+               logloss = ll_fn(y, oof), Brier = brier_fn(y, oof))
+  }))
+}
+```
+
+### 3. Hyper-parameter tuning
+
+Small, shallow trees with strong regularisation, because there are only ~300 CKD cases. Tuning picks the combination with the lowest cross-validated log-loss (using the first repeat's folds). Early stopping picks the number of rounds.
+
+```{r xgb-tune}
+base_params <- list(objective = "binary:logistic", eval_metric = "logloss",
+                    subsample = 0.8, nthread = n_threads)
+
+grid <- expand.grid(max_depth = c(2, 3, 4), eta = c(0.03, 0.08),
+                    min_child_weight = c(5, 10), colsample_bytree = c(0.6, 0.9))
+
+dall <- xgb.DMatrix(X, label = y)
+
+tune_res <- do.call(rbind, lapply(seq_len(nrow(grid)), function(i) {
+  p  <- c(base_params, as.list(grid[i, ]))
+  cv <- xgb.cv(params = p, data = dall, nrounds = 1000, folds = folds[[1]],
+               early_stopping_rounds = 40, verbose = 0)
+  lg <- as.data.frame(cv$evaluation_log)
+  j  <- which.min(lg$test_logloss_mean)
+  cbind(grid[i, ], nrounds = lg$iter[j], cv_logloss = lg$test_logloss_mean[j])
+}))
+tune_res <- tune_res[order(tune_res$cv_logloss), ]
+
+best        <- tune_res[1, ]
+best_params <- c(base_params, as.list(best[c("max_depth", "eta", "min_child_weight", "colsample_bytree")]))
+best_rounds <- best$nrounds
+
+kable(head(tune_res, 6), digits = 4, row.names = FALSE,
+      caption = "Top 6 of 24 hyper-parameter combinations (5-fold CV log-loss).")
+```
+
+Hyper-parameters were chosen on the same data used for the performance estimates below, so the absolute AUC is slightly optimistic. Every model in the comparison uses the same settings, so *comparisons* between models are fair. Nested CV would remove the optimism.
+
+### 4. Predictive performance
+
+```{r xgb-perf}
+xgb_fit_predict <- function(extra = list(), rounds = best_rounds) {
+  function(Xtr, ytr, Xte) {
+    p <- c(best_params, extra)
+    m <- xgb.train(params = p, data = xgb.DMatrix(Xtr, label = ytr), nrounds = rounds, verbose = 0)
+    predict(m, Xte)
+  }
+}
+
+# Logistic regression baseline: the same model as the group's main logistic regression
+# (ckd ~ age + alcohol_quantity * sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails)
+lr_data <- function(Xm) {
+  d <- as.data.frame(Xm)
+  d$beer             <- as.integer(rowSums(d[c("low_alcohol_beer", "mid_strength_beer", "full_strength_beer")]) > 0)
+  d$wine             <- as.integer(rowSums(d[c("white_wine", "red_wine", "low_alcohol_wine",
+                                               "champagne_sparkling_wine", "fortified_wine")]) > 0)
+  d$spirits_liqueurs <- as.integer(rowSums(d[c("spirits_rtd", "liqueurs", "spirits")]) > 0)
+  d
+}
+glm_fit_predict <- function(Xtr, ytr, Xte) {
+  d <- lr_data(Xtr); d$y <- ytr
+  m <- glm(y ~ AGE + alcohol_quantity * male + ALC_freq_3 + diabetes +
+             beer + wine + spirits_liqueurs + cider + cocktails,
+           data = d, family = binomial())
+  predict(m, newdata = lr_data(Xte), type = "response")
+}
+
+null_fit_predict <- function(Xtr, ytr, Xte) rep(mean(ytr), nrow(Xte))
+
+spw <- sum(y == 0) / sum(y == 1)
+
+res <- list(
+  "Null (prevalence only)"                = cv_eval(null_fit_predict),
+  "Logistic regression"                   = cv_eval(glm_fit_predict),
+  "XGBoost"                               = cv_eval(xgb_fit_predict()),
+  "XGBoost + scale_pos_weight"            = cv_eval(xgb_fit_predict(list(scale_pos_weight = spw)))
+)
+
+perf <- bind_rows(res, .id = "Model") %>%
+  group_by(Model) %>%
+  summarise(across(c(AUC, PR_AUC, logloss, Brier),
+                   list(mean = mean, sd = sd), .names = "{.col}_{.fn}"), .groups = "drop")
+
+perf_tab <- perf %>%
+  transmute(Model,
+            AUC       = sprintf("%.3f (%.3f)", AUC_mean, AUC_sd),
+            `PR-AUC`  = sprintf("%.3f (%.3f)", PR_AUC_mean, PR_AUC_sd),
+            `Log-loss`= sprintf("%.4f (%.4f)", logloss_mean, logloss_sd),
+            Brier     = sprintf("%.4f (%.4f)", Brier_mean, Brier_sd))
+kable(perf_tab, caption = paste0("Out-of-fold performance, mean (SD) over ", n_rep,
+      " repeats of stratified ", k_fold, "-fold CV. PR-AUC for a no-skill model equals prevalence (",
+      round(mean(y), 3), "). scale_pos_weight re-weights CKD cases; it improves ranking of cases but distorts predicted probabilities, so log-loss and Brier are expected to worsen."))
+```
+
+```{r xgb-roc, fig.width=6.5, fig.height=6, fig.cap="XGBoost Figure 1. Out-of-fold ROC curves for XGBoost and logistic regression (first repeat of stratified 5-fold CV). Every prediction comes from a model that did not see that person. The dashed line is a model with no skill (AUC 0.5)."}
+# Out-of-fold predictions from the first CV repeat, so each person gets one honest prediction
+oof_pred <- function(fit_predict, r = 1) {
+  oof <- numeric(length(y))
+  for (te in folds[[r]]) {
+    tr <- setdiff(seq_along(y), te)
+    oof[te] <- fit_predict(X[tr, , drop = FALSE], y[tr], X[te, , drop = FALSE])
+  }
+  oof
+}
+roc_df <- function(p, model) {       # sensitivity and 1 - specificity at every threshold
+  o <- order(p, decreasing = TRUE); yo <- y[o]
+  data.frame(model = model,
+             fpr = c(0, cumsum(yo == 0) / sum(y == 0)),
+             tpr = c(0, cumsum(yo == 1) / sum(y == 1)))
+}
+# XGBoost's row subsampling draws random numbers. Save and restore the random-number state so
+# this extra fit does not shift the random draws used by the later sections (results stay identical).
+rng_state <- .Random.seed
+p_xgb <- oof_pred(xgb_fit_predict())
+p_lr  <- oof_pred(glm_fit_predict)
+assign(".Random.seed", rng_state, envir = globalenv())
+lab_xgb <- sprintf("XGBoost (AUC %.3f)", auc_fn(y, p_xgb))
+lab_lr  <- sprintf("Logistic Regression (AUC %.3f)", auc_fn(y, p_lr))
+roc_all <- rbind(roc_df(p_xgb, lab_xgb), roc_df(p_lr, lab_lr))
+roc_all$model <- factor(roc_all$model, levels = c(lab_xgb, lab_lr))
+
+ggplot(roc_all, aes(fpr, tpr, colour = model)) +
+  geom_abline(linetype = "dashed", colour = "grey60") +
+  geom_step(linewidth = 0.8) +
+  scale_colour_manual(values = setNames(c("steelblue", "#2c3e50"), c(lab_xgb, lab_lr))) +
+  coord_equal() +
+  labs(x = "False Positive Rate (1 - Specificity)", y = "True Positive Rate (Sensitivity)",
+       colour = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+### 5. Does sex modify the alcohol association?
+
+XGBoost has no coefficient to test, so effect modification is assessed by **forbidding** the interaction and checking whether predictions get worse. Using `interaction_constraints`, one model is not allowed to put `male` and any alcohol variable in the same tree branch. If sex really changes how alcohol relates to CKD, blocking that interaction should hurt out-of-fold log-loss.
+
+The same is done for sex × smoking (secondary question).
+
+```{r xgb-constraint}
+# Groups of features allowed to interact.
+block_sets <- function(block) {
+  idx0 <- function(v) match(v, colnames(X)) - 1L   # xgboost wants 0-based column indices
+  list(idx0(setdiff(colnames(X), "male")), idx0(setdiff(colnames(X), block)))
+}
+
+res_alc <- cv_eval(xgb_fit_predict(list(interaction_constraints = block_sets(alc_vars))))
+res_smk <- cv_eval(xgb_fit_predict(list(interaction_constraints = block_sets(smoke_vars))))
+res_free <- res[["XGBoost"]]
+
+delta <- data.frame(
+  Test = c("Block sex x alcohol", "Block sex x smoking"),
+  `Mean log-loss increase when blocked` = c(mean(res_alc$logloss - res_free$logloss),
+                                            mean(res_smk$logloss - res_free$logloss)),
+  `Repeats where blocking was worse` = c(sprintf("%d / %d", sum(res_alc$logloss > res_free$logloss), n_rep),
+                                         sprintf("%d / %d", sum(res_smk$logloss > res_free$logloss), n_rep)),
+  `Mean AUC change` = c(mean(res_alc$AUC - res_free$AUC), mean(res_smk$AUC - res_free$AUC)),
+  check.names = FALSE
+)
+kable(delta, digits = 5, caption = "Effect of forbidding sex interactions (constrained minus unconstrained, out-of-fold). Positive log-loss increase = the interaction was useful.")
+```
+
+```{r xgb-constraint-verdict, results='asis'}
+d1 <- delta[[2]][1]
+cat(if (d1 > 0.001 && sum(res_alc$logloss > res_free$logloss) == n_rep)
+      "**Reading:** blocking sex x alcohol consistently worsened out-of-fold log-loss, which supports effect modification by sex."
+    else
+      "**Reading:** blocking sex x alcohol made little or no difference to out-of-fold log-loss, so XGBoost finds no extra predictive information in a sex-specific alcohol effect. This does not prove there is no interaction (about 300 CKD cases gives limited power) and should be compared with the likelihood-ratio test from the logistic regression.")
+```
+
+The repeats share one dataset, so they are not independent replicates. Treat this as descriptive evidence, not a formal hypothesis test.
+
+### 6. What drives the predictions? (SHAP)
+
+SHAP values split each person's predicted CKD log-odds into contributions from each variable. The final model is fitted on all data with the tuned settings.
+
+```{r xgb-shap}
+final <- xgb.train(best_params, dall, nrounds = best_rounds, verbose = 0)
+
+# SHAP values via xgboost's built-in TreeSHAP (the argument differs between xgboost versions)
+attempts <- list(
+  function() predict(final, dall, predcontrib = TRUE),
+  function() predict(final, X, predcontrib = TRUE),
+  function() predict(final, dall, type = "contrib"),
+  function() predict(final, X, type = "contrib")
+)
+S <- NULL
+for (f in attempts) {
+  out <- tryCatch(as.matrix(f()), error = function(e) NULL)
+  if (!is.null(out) && nrow(out) == nrow(X) && ncol(out) >= ncol(X)) { S <- out; break }
+}
+if (is.null(S)) stop("No SHAP output. xgboost version: ", packageVersion("xgboost"))
+S <- S[, seq_len(ncol(X)), drop = FALSE]   # variables come first; drop the intercept column
+colnames(S) <- colnames(X)
+
+imp <- sort(colMeans(abs(S)), decreasing = TRUE)
+```
+
+```{r xgb-shap-bar, fig.cap="XGBoost Figure 2. Mean absolute SHAP value per variable (importance on the log-odds scale). XGBoost, n = all adults 35+. Correlated beverage columns share credit, so individual beverage bars understate beverage type as a whole (see XGBoost Table 4)."}
+imp_df <- data.frame(var = names(imp), importance = imp) %>%
+  slice_head(n = 12) %>%                                   # 12 most important variables
+  mutate(var = factor(var, levels = c(setdiff(var_order, bev_cols)[1:5],           # Age, Sex, Diabetes, Quantity, Frequency
+                                      bev_cols[order(-imp[bev_cols])],             # beverages, most important first
+                                      smoke_vars))) %>%                            # then smoking
+  arrange(var) %>%
+  mutate(label = factor(labels[as.character(var)], levels = rev(labels[as.character(var)])))
+ggplot(imp_df, aes(importance, label)) +
+  geom_col(fill = "steelblue") +
+  labs(x = "Mean |SHAP| (Log-Odds)", y = NULL) +
+  theme_minimal(base_size = 12)
+```
+
+```{r xgb-shap-swarm, fig.height=6, fig.cap="XGBoost Figure 3. SHAP values per person for the 12 most important variables. Each point is one person; colour is the person's own value of that variable (rank-scaled within variable)."}
+top <- names(imp)[1:12]
+long <- do.call(rbind, lapply(top, function(v) {
+  data.frame(var = v, shap = S[, v],
+             value = rank(X[, v], ties.method = "average") / length(y))
+}))
+long$label <- factor(labels[long$var], levels = rev(labels[top]))
+set.seed(1)
+ggplot(long, aes(shap, label, colour = value)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_jitter(height = 0.22, size = 0.7, alpha = 0.6) +
+  scale_colour_gradient(low = "#4C78A8", high = "#E45756", name = "Feature value",
+                        breaks = c(0.1, 0.9), labels = c("low", "high")) +
+  labs(x = "SHAP Value (Impact on CKD Log-Odds)", y = NULL) +
+  theme_minimal(base_size = 12)
+```
+
+```{r xgb-shap-group}
+grp <- list(
+  "Age"                         = "AGE",
+  "Sex"                         = "male",
+  "Alcohol quantity"            = "alcohol_quantity",
+  "Alcohol frequency (3+ drinks)" = "ALC_freq_3",
+  "Beverage type (13 flags)"    = bev_cols,
+  "Smoking (2 variables)"       = smoke_vars,
+  "Diabetes"                    = "diabetes"
+)
+grp_tab <- data.frame(Group = names(grp),
+                      `Mean |SHAP| (summed)` = sapply(grp, function(v) sum(colMeans(abs(S[, v, drop = FALSE]))))
+                      , check.names = FALSE, row.names = NULL)
+grp_tab <- grp_tab[order(-grp_tab[[2]]), ]
+kable(grp_tab, digits = 4, caption = "XGBoost Table 4. Grouped SHAP importance. Summing over related columns avoids the dilution that correlated beverage flags cause for single-variable importance.")
+```
+
+#### Alcohol effect by sex
+
+If sex modifies the alcohol association, the alcohol SHAP curve should differ between males and females.
+
+```{r xgb-shap-sex, fig.cap="XGBoost Figure 4. SHAP contribution of alcohol quantity (last week) to CKD log-odds, by sex. Points are individuals; lines are loess smooths with 95% bands. Separated or diverging lines suggest sex-specific alcohol effects; overlapping lines suggest none. Interpret the right-hand tail cautiously: few people drink heavily."}
+sh <- data.frame(alcohol = X[, "alcohol_quantity"], shap = S[, "alcohol_quantity"],
+                 Sex = factor(ifelse(X[, "male"] == 1, "Male", "Female")))
+ggplot(sh, aes(alcohol, shap, colour = Sex, fill = Sex)) +
+  geom_hline(yintercept = 0, colour = "grey60") +
+  geom_point(alpha = 0.25, size = 0.8) +
+  geom_smooth(method = "loess", span = 0.9, se = TRUE, alpha = 0.15) +
+  scale_colour_manual(values = sex_cols) +
+  scale_fill_manual(values = sex_cols) +
+  coord_cartesian(xlim = c(0, quantile(sh$alcohol, 0.98))) +
+  labs(x = "Alcohol Quantity (standard drinks per day, last week)",
+       y = "SHAP Value for Alcohol Quantity") +
+  theme_minimal(base_size = 12)
+```
+
+#### Smoking effect by sex (secondary question)
+
+If sex modifies the smoking association, the smoking SHAP values should differ between males and females within each smoking group.
+
+```{r xgb-shap-smoking, fig.width=7, fig.height=4.5, fig.cap="XGBoost Figure 5. Mean SHAP contribution of smoking status to CKD log-odds, by sex. Each person's smoking contribution is the sum of the current-smoker and ex-smoker SHAP values. Points are group means and bars are 95% confidence intervals. Similar points for males and females within a group suggest no sex-specific smoking effect."}
+smk <- data.frame(
+  shap   = S[, "smoker_current"] + S[, "smoker_ex"],     # total contribution of smoking status
+  Status = factor(ifelse(X[, "smoker_current"] == 1, "Current Smoker",
+                  ifelse(X[, "smoker_ex"] == 1, "Ex-Smoker", "Never Smoked")),
+                  levels = c("Never Smoked", "Ex-Smoker", "Current Smoker")),
+  Sex    = factor(ifelse(X[, "male"] == 1, "Male", "Female")))
+smk_sum <- smk %>%
+  group_by(Status, Sex) %>%
+  summarise(n = n(), mean = mean(shap), se = sd(shap) / sqrt(n), .groups = "drop") %>%
+  mutate(lo = mean - 1.96 * se, hi = mean + 1.96 * se)
+
+ggplot(smk_sum, aes(Status, mean, colour = Sex)) +
+  geom_hline(yintercept = 0, colour = "grey60") +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.15, position = position_dodge(width = 0.4)) +
+  geom_point(size = 3, position = position_dodge(width = 0.4)) +
+  scale_colour_manual(values = sex_cols) +
+  labs(x = NULL, y = "Mean SHAP Value for Smoking Status") +
+  theme_minimal(base_size = 12)
+```
+
+### 7. Assumptions and limitations
+
+- **Alcohol exposure window.** Alcohol is recorded for the survey week only, while CKD develops over years. Binge drinking and regular light drinking are not distinguished by the weekly quantity.
+- **Reverse causation.** People diagnosed with CKD often cut back on drinking, which can make drinkers look protected.
+- **Sample.** Only last-week drinkers aged 35+ with complete data are included; there is no non-drinker reference group.
+- **Leakage avoided.** `eGFR_range` (which defines CKD) and the risk categories derived from alcohol quantity were excluded from the predictors.
+- **Importance with correlated predictors.** Beverage-type flags overlap with total quantity, so single-variable importance is diluted; grouped importance (XGBoost Table 4) is more reliable.
+- **Small numbers.** About 313 CKD cases (113 female, 200 male) limit power to detect interactions.
+- **Association only.** Neither SHAP values nor the constraint test establish causation.
+- **Tuning optimism.** Hyper-parameters were tuned on the same data as the performance estimates; nested CV would remove this.
+
+### Reproducibility
+
+XGBoost analysis run in R `r getRversion()` with xgboost `r packageVersion("xgboost")`, with fixed random seeds for the cross-validation folds and model fitting.
