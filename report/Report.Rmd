@@ -13,6 +13,7 @@ library(here)
 library(mgcv)
 library(ggplot2)
 library(emmeans)
+
 ```
 
 ## Data cleaning
@@ -22,7 +23,7 @@ df1 <- read.csv(here("data", "AHSnhs11bsp.csv"), stringsAsFactors = TRUE)
 df2 <- read.csv(here("data", "AHSnhs11bbi.csv"), stringsAsFactors = TRUE)
 
 df <- df1 %>%
-  dplyr::select(ABSLID, ABSPID, SEX, SMKSTAT, ALCF3, AGEB, ALINWKSD) %>%
+  dplyr::select(ABSLID, ABSPID, SEX, SMKSTAT, ALCF3, AGEB, ALINWKSD, FEMLSBC) %>%
   filter(!(ABSLID == "NHS11B0009794" & ABSPID == 6)) %>%
   left_join(
       df2 %>%
@@ -90,6 +91,11 @@ ckd_data <- df %>%
       DIABPRVE %in% c(0, 8) ~ NA_real_,
       DIABPRVE %in% c(1, 2) ~ 1,
       DIABPRVE %in% c(3, 4) ~ 0
+    ),
+    menopause = case_when(
+      FEMLSBC %in% c(1:4, 6) ~ 0,
+      FEMLSBC == 5 ~ 1,
+      FEMLSBC == 9 ~ 2
     )
   )
 ```
@@ -184,6 +190,10 @@ df_filter <- df_final %>%
       diabetes,
       levels = c(0, 1)
     ),
+    menopause = factor(
+      menopause,
+      levels = c(0, 1, 2)
+    ),
     across(
       c(
         low_alcohol_beer,
@@ -255,12 +265,174 @@ ckd_data <- df_filter %>%
   )
 ```
 
+### Alcohol quantity
 ```{r}
 model_int <- glm(ckd ~ age + alcohol_quantity * sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data, family = binomial)
-summary(model_int)
 ```
 
-# GAM
+#### Results
+```{r}
+model_summary <- summary(model_int)$coefficients
+
+results_pretty <- data.frame(
+  Variable = rownames(model_summary),
+
+  OR = exp(model_summary[, "Estimate"]),
+
+  `95% CI` = paste0(
+    sprintf("%.2f", exp(model_summary[, "Estimate"] -
+                         1.96 * model_summary[, "Std. Error"])),
+    "–",
+    sprintf("%.2f", exp(model_summary[, "Estimate"] +
+                         1.96 * model_summary[, "Std. Error"]))
+  ),
+
+  `P-value` = ifelse(
+    model_summary[, "Pr(>|z|)"] < 0.001,
+    "<0.001",
+    sprintf("%.3f", model_summary[, "Pr(>|z|)"])
+  ),
+
+  check.names = FALSE
+)
+
+results_pretty$OR <- sprintf("%.2f", results_pretty$OR)
+
+print(results_pretty, row.names = FALSE)
+```
+
+Forest plot: all variables
+
+```{r}
+plot_data <- data.frame(
+  Variable = rownames(model_summary),
+  OR = exp(model_summary[, "Estimate"]),
+  Lower = exp(model_summary[, "Estimate"] -
+                1.96 * model_summary[, "Std. Error"]),
+  Upper = exp(model_summary[, "Estimate"] +
+                1.96 * model_summary[, "Std. Error"]),
+  p_value = model_summary[, "Pr(>|z|)"]
+)
+
+plot_data <- subset(plot_data, Variable != "(Intercept)")
+
+ggplot(plot_data,
+       aes(x = OR, y = reorder(Variable, OR))) +
+  geom_vline(xintercept = 1, linetype = "dashed",
+             color = "grey50") +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper),
+                 height = 0.2, color = "steelblue2") +
+  geom_point(size = 3, color = "steelblue2") +
+  scale_x_log10() +
+  labs(
+    title = "Association between Covariates and CKD",
+    x = "Odds Ratio (95% CI, log scale)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+Forest plot: compare genders
+
+```{r}
+b <- coef(model_int)
+V <- vcov(model_int)
+
+beta_female <- b["alcohol_quantity"]
+
+se_female <- sqrt(
+  V["alcohol_quantity", "alcohol_quantity"]
+)
+
+beta_male <- b["alcohol_quantity"] +
+  b["alcohol_quantity:sexMale"]
+
+se_male <- sqrt(
+  V["alcohol_quantity", "alcohol_quantity"] +
+  V["alcohol_quantity:sexMale",
+    "alcohol_quantity:sexMale"] +
+  2 * V["alcohol_quantity",
+        "alcohol_quantity:sexMale"]
+)
+
+plot_interaction <- data.frame(
+  Sex = c("Female", "Male"),
+  OR = exp(c(beta_female, beta_male)),
+  Lower = exp(c(
+    beta_female - 1.96 * se_female,
+    beta_male - 1.96 * se_male
+  )),
+  Upper = exp(c(
+    beta_female + 1.96 * se_female,
+    beta_male + 1.96 * se_male
+  ))
+)
+
+ggplot(plot_interaction,
+       aes(x = OR, y = Sex, color = Sex)) +
+  geom_vline(
+    xintercept = 1,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_errorbar(
+    aes(xmin = Lower, xmax = Upper),
+    orientation = "y",
+    width = 0.2,
+    linewidth = 0.8
+  ) +
+  geom_point(size = 3) +
+  scale_color_manual(
+    values = c(
+      "Male" = "steelblue2",
+      "Female" = "tomato1"
+    )
+  ) +
+  scale_x_log10() +
+  labs(
+    title = "Association between Alcohol Quantity and CKD by Sex",
+    x = "Odds Ratio (95% CI)",
+    y = "Sex",
+    color = "Sex"
+  ) +
+  theme_classic(base_size = 12)
+```
+
+Effect Plot
+
+```{r}
+effect_data <- ggpredict(
+  model_int,
+  terms = c("alcohol_quantity", "sex")
+)
+
+ggplot(effect_data, aes(x = x, y = predicted,
+                        colour = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+              alpha = 0.15, colour = NA) +
+  
+  scale_colour_manual(
+    values = c("Female" = "tomato1",
+               "Male" = "steelblue2")
+  ) +
+
+  scale_fill_manual(
+    values = c("Female" = "tomato1",
+               "Male" = "steelblue2")
+  ) +
+  
+  labs(
+    x = "Alcohol quantity (standard drinks per week)",
+    y = "Predicted probability of CKD",
+    colour = "Sex",
+    fill = "Sex",
+    title = "Interaction Effect of Alcohol Quantity and Sex on CKD"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+## GAM (alcohol only)
 
 ```{r}
 # Main model: separate alcohol curves by sex, adjusted for all confounders
@@ -285,18 +457,6 @@ c(participants = nobs(fit), CKD_cases = sum(ckd == "1"))
 knitr::kable(summary(fit)$s.table[, c("edf", "p-value"), drop = FALSE],
              digits = 3, caption = "Adjusted alcohol association within each sex.")
 comparison
-```
-
-```{r}
-fit_k10 <- update(
-  fit,
-  . ~ . - s(alcohol_quantity, by = sex, k = 5) +
-          s(alcohol_quantity, by = sex, k = 10),
-  data = model.frame(fit)
-)
-
-# Largest absolute change in fitted CKD probability, in percentage points
-100 * max(abs(fitted(fit_k10) - fitted(fit)))
 ```
 
 ```{r alcohol-curves-report, echo=FALSE, fig.width=8, fig.height=4.8, fig.cap="Change in adjusted CKD log-odds relative to 1 standard drink/day. Shading shows pointwise 95% intervals for the sex-specific estimates. Pink ticks below and blue ticks above show observed quantities for females and males, respectively."}
@@ -400,3 +560,273 @@ par(op)
 summary(fit)$s.table[, c("edf", "p-value"), drop = FALSE]
 ```
 
+Testing for basis dimension
+
+```{r}
+fit_k10 <- update(
+  fit,
+  . ~ . - s(alcohol_quantity, by = sex, k = 5) +
+          s(alcohol_quantity, by = sex, k = 10),
+  data = model.frame(fit)
+)
+
+# Largest absolute change in fitted CKD probability, in percentage points
+100 * max(abs(fitted(fit_k10) - fitted(fit)))
+```
+
+#### Assumptions and Diagnostics
+
+Checking linearity: scatter plots with LOWESS smoothing curves
+```{r,echo=FALSE}
+par(mfrow = c(2, 2))
+
+plot(
+  ckd_data$alcohol_quantity,
+  model_int$linear.predictors,
+  main = "Alcohol Quantity",
+  xlab = "Alcohol quantity",
+  ylab = "Linear predictor (logit)",
+  pch = 16,
+  col = "gray20",
+  cex = 0.5
+)
+
+lines(
+  lowess(
+    ckd_data$alcohol_quantity,
+    model_int$linear.predictors
+  ),
+  col = "steelblue2",
+  lwd = 2
+)
+
+plot(
+  ckd_data$age,
+  model_int$linear.predictors,
+  main = "Age",
+  xlab = "Age",
+  ylab = "Linear predictor (logit)",
+  pch = 16,
+  col = "gray20",
+  cex = 0.5
+)
+
+lines(
+  lowess(
+    ckd_data$age,
+    model_int$linear.predictors
+  ),
+  col = "steelblue2",
+  lwd = 2
+)
+
+plot(
+  ckd_data$alcohol_frequency,
+  model_int$linear.predictors,
+  main = "Alcohol Frequency",
+  xlab = "Alcohol frequency",
+  ylab = "Linear predictor (logit)",
+  pch = 16,
+  col = "gray20",
+  cex = 0.5
+)
+
+lines(
+  lowess(
+    ckd_data$alcohol_frequency,
+    model_int$linear.predictors
+  ),
+  col = "steelblue2",
+  lwd = 2
+)
+
+mtext(
+  "Continuous Predictors and the Linear Predictor of CKD",
+  outer = TRUE,
+  cex = 1.1,
+  font = 2
+)
+
+par(mfrow = c(1, 1))
+```
+
+Multicollinearity: variance inflation factors
+```{r,message=FALSE,warning=FALSE}
+round(vif(model_int), 2)
+```
+
+A model without the interaction term was fitted to compare
+```{r}
+model_no_int <- glm(ckd ~ age + alcohol_quantity + sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data, family = binomial)
+round(vif(model_no_int), 2)
+```
+
+Influential observations: Cook's distance
+```{r}
+cd <- cooks.distance(model_int)
+top5 <- order(cd, decreasing = TRUE)[1:5]
+
+plot(
+  1:length(cd), cd,
+  type = "h",
+  col = "gray50",
+  lwd = 1.2,
+  xlab = "Observation",
+  ylab = "Cook's distance",
+  main = "Cook's Distance Plot",
+  ylim = c(0, max(cd) * 1.15)
+)
+
+points(
+  top5,
+  cd[top5],
+  col = "steelblue",
+  pch = 16,
+  cex = 1
+)
+
+text(
+  top5,
+  cd[top5],
+  labels = top5,
+  pos = 3,
+  col = "steelblue",
+  cex = 0.8
+)
+```
+
+```{r}
+top7_cd <- sort(cd, decreasing = TRUE)[1:7]
+round(top7_cd, 4)
+
+top7 <- order(cd, decreasing = TRUE)[1:7]
+data.frame(
+  Observation = top7,
+  Cooks_Distance = round(cd[top7], 4),
+  ckd_data[top7, c(
+    "ckd",
+    "age",
+    "alcohol_quantity",
+    "sex",
+    "alcohol_frequency",
+    "diabetes",
+    "beer",
+    "wine",
+    "spirits_liqueurs",
+    "cider",
+    "cocktails"
+  )]
+)
+```
+
+### Smoking
+```{r}
+# no smoking, model 1, reduced
+model_smoking_reduced <- glm(ckd ~ age + sex + diabetes, data = ckd_data, family = binomial)
+
+# smoking + sex, model 2, additive
+model_smoking_additive <- glm(ckd ~ age + smoker_status + sex + diabetes, data = ckd_data, family = binomial)
+
+# model 3, interaction
+model_smoking_interaction <- glm(ckd ~ age + smoker_status * sex + diabetes, data = ckd_data, family = binomial)
+```
+
+LRT between model 1 and model 2: Smoking overall association
+```{r}
+anova(model_smoking_reduced, model_smoking_additive, test = "LRT")
+```
+
+LRT between model 2 and model 3: Whether sex modifies the association
+```{r}
+anova(model_smoking_additive, model_smoking_interaction, test = "LRT")
+```
+
+### Menopause
+```{r}
+ckd_data_menopausewomen_men <- ckd_data %>%
+  filter(
+    !menopause == "0"
+      )
+```
+
+```{r}
+model_menopausewomenmen <- glm(ckd ~ age + alcohol_quantity * sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data_menopausewomen_men, family = binomial)
+
+model_menopausesummary <- summary(model_menopausewomenmen)$coefficients
+
+results_pretty_menopause <- data.frame(
+  Variable = rownames(model_menopausesummary),
+
+  OR = exp(model_menopausesummary[, "Estimate"]),
+
+  `95% CI` = paste0(
+    sprintf("%.2f", exp(model_menopausesummary[, "Estimate"] -
+                         1.96 * model_menopausesummary[, "Std. Error"])),
+    "–",
+    sprintf("%.2f", exp(model_menopausesummary[, "Estimate"] +
+                         1.96 * model_menopausesummary[, "Std. Error"]))
+  ),
+
+  `P-value` = ifelse(
+    model_menopausesummary[, "Pr(>|z|)"] < 0.001,
+    "<0.001",
+    sprintf("%.3f", model_menopausesummary[, "Pr(>|z|)"])
+  ),
+
+  check.names = FALSE
+)
+
+results_pretty_menopause$OR <- sprintf("%.2f", results_pretty_menopause$OR)
+
+print(results_pretty_menopause, row.names = FALSE)
+```
+
+## Method Descriptive Summaries 
+
+```{r}
+
+age_labels <- c("35-39", "40-44", "45-49", "50-54", "55-59", "60-64",
+                "65-69", "70-74", "75-79", "80-84", "85+")
+
+plot_data <- df_filter %>%
+  mutate(
+    AgeGroup = cut(age,
+                   breaks = c(34, 39, 44, 49, 54, 59, 64, 69, 74, 79, 84, Inf),
+                   labels = age_labels, right = TRUE),
+    Sex = factor(sex)
+  ) %>%
+  filter(!is.na(AgeGroup)) %>%
+  count(Sex, AgeGroup) %>%
+  mutate(
+    Proportion     = n / sum(n),                        
+    PlotProportion = ifelse(Sex == "Male", -Proportion, Proportion)
+  )
+
+lim <- ceiling(max(plot_data$Proportion) * 100) / 100   # symmetric axis from the data
+
+p_pyramid <- ggplot(plot_data, aes(x = AgeGroup, y = PlotProportion, fill = Sex)) +
+  geom_col(width = 0.85) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = function(x) paste0(abs(x) * 100, "%"),
+    limits = c(-lim, lim)
+  ) +
+  scale_fill_manual(values = c("Male" = "steelblue2", "Female" = "tomato1")) +
+  labs(
+    title = "Age and sex structure of the study population",
+    x = "Age group (years)",
+    y = "% of all respondents",
+    fill = "Sex"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+p_pyramid
+ggsave(here("figures", "age_sex_pyramid.png"), plot = p_pyramid,
+       width = 7, height = 5, dpi = 300)
+
+```
