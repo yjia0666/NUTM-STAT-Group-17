@@ -10,6 +10,9 @@ library(dplyr)
 library(stringr)
 library(tidyverse)
 library(here)
+library(mgcv)
+library(ggplot2)
+library(emmeans)
 ```
 
 ## Data cleaning
@@ -257,5 +260,143 @@ model_int <- glm(ckd ~ age + alcohol_quantity * sex + alcohol_frequency + diabet
 summary(model_int)
 ```
 
+# GAM
 
+```{r}
+# Main model: separate alcohol curves by sex, adjusted for all confounders
+fit <- gam(
+  ckd ~ age + sex + s(alcohol_quantity, by = sex, k = 5) +
+    alcohol_frequency + diabetes + beer + wine + spirits_liqueurs +
+    cider + cocktails,
+  data = ckd_data, family = binomial(), method = "REML"
+)
+
+# Test sex modification: same participants and covariates in both models
+separate_ml <- update(fit, method = "ML")
+shared_ml <- update(
+  separate_ml, . ~ . - s(alcohol_quantity, by = sex, k = 5) +
+    s(alcohol_quantity, k = 5)
+)
+comparison <- anova(shared_ml, separate_ml, test = "Chisq")
+
+# Manuscript results
+ckd <- model.response(model.frame(fit))
+c(participants = nobs(fit), CKD_cases = sum(ckd == "1"))
+knitr::kable(summary(fit)$s.table[, c("edf", "p-value"), drop = FALSE],
+             digits = 3, caption = "Adjusted alcohol association within each sex.")
+comparison
+```
+
+```{r}
+fit_k10 <- update(
+  fit,
+  . ~ . - s(alcohol_quantity, by = sex, k = 5) +
+          s(alcohol_quantity, by = sex, k = 10),
+  data = model.frame(fit)
+)
+
+# Largest absolute change in fitted CKD probability, in percentage points
+100 * max(abs(fitted(fit_k10) - fitted(fit)))
+```
+
+```{r alcohol-curves-report, echo=FALSE, fig.width=8, fig.height=4.8, fig.cap="Change in adjusted CKD log-odds relative to 1 standard drink/day. Shading shows pointwise 95% intervals for the sex-specific estimates. Pink ticks below and blue ticks above show observed quantities for females and males, respectively."}
+library(ggplot2)
+
+d <- model.frame(fit)
+ref <- 1
+
+# Same participants and adjustment variables; only the alcohol curve changes
+shared_fit <- update(
+  fit, . ~ . - s(alcohol_quantity, by = sex, k = 5) +
+    s(alcohol_quantity, k = 5),
+  data = d
+)
+
+# Calculate the change from 1 drink/day, holding other predictors fixed
+make_curve <- function(model, rows, label) {
+  r <- range(rows$alcohol_quantity)
+  stopifnot(ref >= r[1], ref <= r[2])
+  x <- sort(unique(c(seq(r[1], r[2], length.out = 200), ref)))
+
+  nd <- rows[rep(1, length(x)), , drop = FALSE]
+  nd$alcohol_quantity <- x
+  baseline <- nd
+  baseline$alcohol_quantity <- ref
+
+  D <- predict(model, nd, type = "lpmatrix") -
+       predict(model, baseline, type = "lpmatrix")
+  est <- drop(D %*% coef(model))
+  se <- sqrt(pmax(0, rowSums((D %*% vcov(model, unconditional = TRUE)) * D)))
+
+  data.frame(x, group = label, est, lo = est - 1.96 * se, hi = est + 1.96 * se)
+}
+
+# Each sex-specific curve stops at that group's observed limits
+female <- d[tolower(as.character(d$sex)) == "female", , drop = FALSE]
+male   <- d[tolower(as.character(d$sex)) == "male",   , drop = FALSE]
+stopifnot(nrow(female) > 0, nrow(male) > 0)
+
+by_sex <- rbind(make_curve(fit, female, "Female"),
+                make_curve(fit, male,   "Male"))
+curves <- rbind(by_sex, make_curve(shared_fit, d, "Shared"))
+
+panels <- c("Female", "Male")
+cols <- c(Female = "tomato1", Male = "steelblue2")
+shared <- subset(curves, group == "Shared")
+observed <- list(Female = female, Male = male)
+
+# Identical axes make the slopes visually comparable
+xlim <- range(d$alcohol_quantity)
+ylim <- range(0, by_sex$lo, by_sex$hi, shared$est)
+
+op <- par(no.readonly = TRUE)
+layout(matrix(c(1, 2, 3, 3), nrow = 2, byrow = TRUE),
+       heights = c(4, 1))
+par(oma = c(0, 2.5, 0, 0), mgp = c(2, 0.6, 0), las = 1)
+
+for (g in panels) {
+  z <- by_sex[by_sex$group == g, ]
+  col <- cols[[g]]
+
+  par(mar = c(2, 2.7, 2, 0.7))
+  plot(z$x, z$est, type = "n", xlim = xlim, ylim = ylim,
+       xlab = "", ylab = "", main = g, col.main = col, bty = "l")
+
+  polygon(c(z$x, rev(z$x)), c(z$lo, rev(z$hi)),
+          col = adjustcolor(col, alpha.f = 0.18), border = NA)
+  abline(h = 0, col = "#B56A00", lty = 3)
+  abline(v = ref, col = "grey70", lty = 3)
+  lines(shared$x, shared$est, col = "grey35", lty = 2, lwd = 2)
+  lines(z$x, z$est, col = col, lwd = 2.5)
+
+  rug(observed[[g]]$alcohol_quantity,
+      side = 1,
+      col = adjustcolor(col, alpha.f = 0.35), ticksize = 0.035)
+}
+
+mtext("Change in CKD log-odds (vs 1 drink/day)",
+      side = 2, outer = TRUE, line = 0.7, las = 0)
+
+# One x-axis label and one legend for both panels
+par(mar = rep(0, 4))
+plot.new()
+text(0.5, 0.91, "Average daily standard drinks in the previous week")
+
+legend("center", ncol = 4, bty = "n", cex = 0.78,
+       legend = c("Female estimate", "Male estimate",
+                  "Shared estimate", "Zero change",
+                  "95% interval", "1 drink/day",
+                  "Female observations", "Male observations"),
+       col = c(cols, "grey35", "#B56A00", "grey75", "grey70", cols),
+       lty = c(1, 1, 2, 3, NA, 3, NA, NA),
+       lwd = c(2.5, 2.5, 2, 1, NA, 1, NA, NA),
+       pch = c(NA, NA, NA, NA, 15, NA, "|", "|"))
+
+layout(1)
+par(op)
+```
+
+```{r}
+summary(fit)$s.table[, c("edf", "p-value"), drop = FALSE]
+```
 
