@@ -93,7 +93,6 @@ ckd_data <- df %>%
       FEMLSBC %in% c(1:4, 6) ~ 0,
       FEMLSBC == 5 ~ 1,
       FEMLSBC == 9 ~ 2
-      
     )
   )
 ```
