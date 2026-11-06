@@ -1,6 +1,6 @@
 ---
 title: "XGBoost: alcohol, sex and CKD (adults aged 35+)"
-author: "Aryaman Sud"
+author: "SID 500555631"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -414,6 +414,31 @@ ggplot(sh, aes(alcohol, shap, colour = Sex, fill = Sex)) +
   coord_cartesian(xlim = c(0, quantile(sh$alcohol, 0.98))) +
   labs(x = "Alcohol Quantity (standard drinks per day, last week)",
        y = "SHAP Value for Alcohol Quantity") +
+  theme_minimal(base_size = 12)
+```
+
+### Smoking effect by sex (secondary question)
+
+If sex modifies the smoking association, the smoking SHAP values should differ between males and females within each smoking group.
+
+```{r shap-smoking, fig.width=7, fig.height=4.5, fig.cap="Figure 5. Mean SHAP contribution of smoking status to CKD log-odds, by sex. Each person's smoking contribution is the sum of the current-smoker and ex-smoker SHAP values. Points are group means and bars are 95% confidence intervals. Similar points for males and females within a group suggest no sex-specific smoking effect."}
+smk <- data.frame(
+  shap   = S[, "smoker_current"] + S[, "smoker_ex"],     # total contribution of smoking status
+  Status = factor(ifelse(X[, "smoker_current"] == 1, "Current Smoker",
+                  ifelse(X[, "smoker_ex"] == 1, "Ex-Smoker", "Never Smoked")),
+                  levels = c("Never Smoked", "Ex-Smoker", "Current Smoker")),
+  Sex    = factor(ifelse(X[, "male"] == 1, "Male", "Female")))
+smk_sum <- smk %>%
+  group_by(Status, Sex) %>%
+  summarise(n = n(), mean = mean(shap), se = sd(shap) / sqrt(n), .groups = "drop") %>%
+  mutate(lo = mean - 1.96 * se, hi = mean + 1.96 * se)
+
+ggplot(smk_sum, aes(Status, mean, colour = Sex)) +
+  geom_hline(yintercept = 0, colour = "grey60") +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.15, position = position_dodge(width = 0.4)) +
+  geom_point(size = 3, position = position_dodge(width = 0.4)) +
+  scale_colour_manual(values = sex_cols) +
+  labs(x = NULL, y = "Mean SHAP Value for Smoking Status") +
   theme_minimal(base_size = 12)
 ```
 
