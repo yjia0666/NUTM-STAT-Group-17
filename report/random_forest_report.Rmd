@@ -34,6 +34,8 @@ library(ggplot2)
 library(pdp)
 library(MASS)
 library(gt)
+library(here)
+library(kableExtra)
 
 set.seed(123)
 
@@ -104,6 +106,8 @@ saveRDS(list(train = train, test = test), "split.rds")
 
 train$ckd <- factor(train$ckd, levels = c(0, 1), labels = c("No_CKD", "CKD"))
 test$ckd  <- factor(test$ckd,  levels = c(0, 1), labels = c("No_CKD", "CKD"))
+levels(train$ckd) <- c("No CKD", "CKD")
+levels(test$ckd) <- c("No CKD", "CKD")
 
 ```
 
@@ -137,12 +141,12 @@ cm_df <- as.data.frame(CM_balanced$table)
 
 # Plotting Confusion Matrix with high aesthetics
 
-ggplot(data = cm_df, aes(x = Reference, y = Prediction, fill = Freq)) +
+initial_confusionmatrix <- ggplot(data = cm_df, aes(x = Reference, y = Prediction, fill = Freq)) +
   geom_tile(color = "white", lwd = 1, linetype = 1) +  # Creates clear tile borders
   geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + # Large, bold numbers
   scale_fill_gradient(low = "skyblue", high = "skyblue3") + # Sleek blue gradient theme
   labs(
-    title = "Balanced Random Forest Performance",
+    title = "Pretuned Balanced Random Forest Performance",
     caption = "AUC-ROC is more reliable than accuracy for downsampled Random Forests.",
     subtitle = paste0("Overall Accuracy: ", round(CM_balanced$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_balanced$err.rate[nrow(rf_balanced$err.rate), "OOB"] * 100, 2), "%"),
     x = "Actual Classes",
@@ -150,13 +154,21 @@ ggplot(data = cm_df, aes(x = Reference, y = Prediction, fill = Freq)) +
   ) +
   theme_minimal(base_size = 14) 
 
+ggsave(here("figures", "RF_initial_confusionmatrix.png"), plot = initial_confusionmatrix,
+       width = 7, height = 5, dpi = 300)
+
+```
+
+```{r}
+png(here("figures", "ROC_untuned.png"))
+
 roc_obj <- roc(test$ckd, pred_prob_balanced)
-auc_value_balanced <- auc(roc(test$ckd, pred_prob_balanced, levels = c("No_CKD", "CKD"), direction = "<"))  
+auc_value_balanced <- auc(roc(test$ckd, pred_prob_balanced, levels = c("No CKD", "CKD"), direction = "<"))  
 plot(roc_obj, main = paste("Area under Curve of the Balanced Random Forest is", round(auc_value_balanced, 3)))
 
 sens_value <- CM_balanced$byClass["Sensitivity"]
 
-Class <- c("No CKD", "CKD")
+Class <- c("No_CKD", "CKD")
 Errors <- round(rf_balanced$confusion[, "class.error"], 3)
 
 class_errors <- data.frame(Class, Errors) %>% gt() %>%
@@ -165,6 +177,7 @@ class_errors <- data.frame(Class, Errors) %>% gt() %>%
     tab_header(title = "CKD status ") 
 
 class_errors
+dev.off()
 
 ```
 
@@ -258,6 +271,9 @@ ggplot(data = cm_randomsearch, aes(x = Reference, y = Prediction, fill = Freq)) 
   ) +
   theme_minimal(base_size = 14) 
 
+ggsave(here("figures", "RF_confusionmatrixfocusedsearch.png"))
+
+
 ```
 
 By testing minimum node sizes around 18 at a constant mtry, an almost flat accuracy of 0.88 may indicate that accuracy is the wrong metric to look at for imbalanced data. From the confusion matrix, the model is mostly predicting No CKD, so tuning hyper parameters based of  optimising sensitivity would be better. 
@@ -333,14 +349,16 @@ cm_adjusted <- as.data.frame(CM_adjusted$table)
 ggplot(data = cm_adjusted, aes(x = Reference, y = Prediction, fill = Freq)) +
   geom_tile(color = "white", lwd = 1, linetype = 1) +  
   geom_text(aes(label = Freq), color = "white", size = 6, fontface = "bold") + 
-  scale_fill_gradient(low = "aquamarine1", high = "aquamarine3") + 
+  scale_fill_gradient(low = "royalblue1", high = "royalblue4") + 
   labs(
-    title = "Random Forest Performance of Adjusted Random Forest",
+    title = "Tuned Balanced Random Forest Performance",
     subtitle = paste0("Overall Accuracy: ", round(CM_adjusted$overall['Accuracy'] * 100, 2), "%, OOB error rate: ", round(rf_adjusted$err.rate[nrow(rf_adjusted$err.rate), "OOB"] * 100, 2), "%"),
     x = "Actual Classes",
     y = "Predicted Classes"
   ) +
   theme_minimal(base_size = 14) 
+
+ggsave(here("figures", "adjusted_RF_confusion_matrix.png"))
 
 
 Class <- c("No CKD", "CKD")
@@ -354,9 +372,13 @@ class_errors
 ```
 
 ```{r, message = 'false'}
-roc_obj <- roc(test$ckd, pred_prob)
-auc_value_adjusted <- auc(roc(test$ckd, pred_prob, levels = c("No_CKD", "CKD"), direction = "<"))  
-plot(roc_obj, main = paste("Area under Curve of the Adjusted Random Forest is", round(auc_value_adjusted, 3)), col = "steelblue4")
+png(here("figures", "ROC_tuned.png"))
+
+roc_adjusted <- roc(test$ckd, pred_prob)
+auc_value_adjusted <- auc(roc(test$ckd, pred_prob, levels = c("No CKD", "CKD"), direction = "<"))  
+plot(roc_adjusted, main = paste("Area under Curve of the Tuned Balanced Random Forest is", round(auc_value_adjusted, 3)), col = "steelblue4")
+
+dev.off()
 
 
 ```
@@ -372,15 +394,29 @@ tree <- rpart(ckd ~ ., data = train, method = "class",
               parms = list(prior = c(0.5, 0.5)),
               control = rpart.control(cp = 0.005, minbucket = 30))
 
+png(here("figures", "decision_tree.png"), width = 6, height = 6, units = "in", res = 300)
+
+
 rpart.plot(tree, type = 2, extra = 104, main = "Chronic Kidney Disease Data")
 
+dev.off()
+
+
+tree_class <- predict(tree, test, type = "class")
 prediction_prob <- predict(tree, test, type = "prob")
 CKD_prob <- prediction_prob[, "CKD"]
 
-roc_obj <- roc(test$ckd, CKD_prob)
-auc_value <- auc(roc_obj)
+roc_tree <- roc(test$ckd, CKD_prob)
+auc_value <- auc(roc_tree)
 
-plot(roc_obj, main = paste("Area under Curve of Decision Tree is", round(auc_value, 3)))
+png(here("figures", "ROC_decision_tree.png"))
+
+plot(roc_tree, main = paste("Area under Curve of Decision Tree is", round(auc_value, 3)))
+
+dev.off()
+
+cm_decision_tree <- confusionMatrix(tree_class, test$ckd, positive = "CKD")
+
 
 ```
 
@@ -400,6 +436,8 @@ ckd_filter_no_sex <- ckd_filter %>%
 idx   <- sample(nrow(ckd_filter_no_sex), 0.7 * nrow(ckd_filter_no_sex))
 train_ns <- train %>% dplyr::select(-sex)
 test_ns  <- test  %>% dplyr::select(-sex)
+levels(train_ns$ckd) <- c("No CKD", "CKD")
+levels(test_ns$ckd) <- c("No CKD", "CKD")
 
 # Need to fix class imbalance via balanced samples
 
@@ -421,6 +459,7 @@ set.seed(123)
 pred_class_nosex <- predict(rf_nosex, test_ns)
 pred_prob_nosex  <- predict(rf_nosex, test_ns, type = "prob")[, 2]
 
+
 CM_nosex <- confusionMatrix(pred_class_nosex, test_ns$ckd, positive = "CKD") # Confusion Matrix
 
 cm_nosex <- as.data.frame(CM_nosex$table)
@@ -439,7 +478,10 @@ ggplot(data = cm_nosex, aes(x = Reference, y = Prediction, fill = Freq)) +
   ) +
   theme_minimal(base_size = 14) 
 
+ggsave(here("figures", "RF_nosexconfusion_matrix.png"))
 
+
+ 
 Class <- c("No CKD", "CKD")
 Errors <- rf_nosex$confusion[, "class.error"]
 class_errors <- data.frame(Class, Errors) %>% gt() %>%
@@ -449,10 +491,15 @@ class_errors <- data.frame(Class, Errors) %>% gt() %>%
 
 class_errors
 
-roc_obj_nosex <- (roc(test_ns$ckd, pred_prob_nosex, levels = c("No_CKD", "CKD"), direction = "<"))  
+roc_obj_nosex <- (roc(test_ns$ckd, pred_prob_nosex, levels = c("No CKD", "CKD"), direction = "<"))  
 auc_valuenosex <- auc(roc_obj_nosex)
 
+
+png(here("figures", "ROC_nosex.png"))
+
 plot(roc_obj_nosex, main = paste("Area under Curve of Random Forest without 'sex' is", round(auc_valuenosex, 3)), col="steelblue")
+
+dev.off()
 
 sens <- sensitivity(pred_class_nosex, test_ns$ckd) #Sensitivity value of no sex RF
 
@@ -463,15 +510,20 @@ sensitivity <- c(sens, CM_nosex$byClass["Sensitivity"])
 sensitivity_table <- data.frame(Name = names, Sensitivity = sensitivity) %>% gt()
 
 
+
 ```
 
 ```{r}
 
-roc_full <- roc(test$ckd, pred_prob, levels = c("No_CKD","CKD"), direction = "<")
+roc_full <- roc(test$ckd, pred_prob, levels = c("No CKD","CKD"), direction = "<")
+ci(roc_full)
 
-roc_ns   <- roc(test_ns$ckd, pred_prob_nosex, levels = c("No_CKD","CKD"), direction = "<")
+
+roc_ns   <- roc(test_ns$ckd, pred_prob_nosex, levels = c("No CKD","CKD"), direction = "<")
 
 roc.test(roc_full, roc_ns)   # DeLong test for paired ROC curves
+
+ci(roc_ns)
 
 ```
 
@@ -495,7 +547,10 @@ ggplot(pd, aes(alcohol_quantity, yhat, colour = sex)) +
   geom_rug(data = train, aes(x = alcohol_quantity), inherit.aes = FALSE, alpha = 0.1) +
   labs(x = "Alcohol quantity in last week", y = "Predicted probability of CKD",
        colour = "Sex") +
+  scale_color_manual(values = c("Female"="tomato1", "Male"="steelblue")) +
   theme_minimal()
+
+ggsave(here("figures", "RF_partial_dependence.png"))
 
 ```
 
@@ -537,13 +592,17 @@ imp_data$Variable <- rownames(imp_data)
 
 # Display results in table
 
-imp_data %>% 
+imp_data_table <- imp_data %>% 
   arrange(desc(MeanDecreaseAccuracy)) %>%
   gt() %>% 
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 2
+  ) %>%
   cols_move_to_start(columns = "Variable") %>%
   cols_label(
     No_CKD = "No CKD"
-  )
+  ) 
 
 # Pivot to long format for easier ggplot grouping
 imp_long <- imp_data %>%
@@ -566,6 +625,95 @@ ggplot(imp_long, aes(x = reorder(Variable, Importance), y = Importance)) +
     panel.spacing = unit(2, "lines")
   )
 
+ggsave(here("figures", "RF_variable_importance.png"))
+
+```
+
+##Formatted Report Plots 
+
+
+
+
+```{r}
+png(here("figures", "ROC_comparison.png"))
+plot(roc_full, col = "steelblue2", main = "Overlaid ROC Curves")
+
+# Overlay the second ROC curve
+plot(roc_ns, col = "tomato", add = TRUE)
+
+# Adding legend
+legend("bottomright", legend = c("Tuned Random Forest", "Tuned Random Forest without Sex"), 
+       col = c("steelblue2", "tomato"), lwd = 2)
+
+dev.off()
+
+  
+```
+
+
+```{r}
+
+latex_output <- imp_data %>% 
+  arrange(desc(MeanDecreaseAccuracy)) %>%
+  gt() %>% 
+  fmt_number(
+    columns = where(is.numeric),
+    decimals = 2
+  ) %>%
+  cols_move_to_start(columns = "Variable") %>%
+  cols_label(
+    No_CKD = "No CKD"
+  ) |>
+  as_latex()
+
+latex_output |> 
+  as.character() |> 
+  cat()
+```
+
+```{r}
+get_metrics <- function(cm, roc_obj) {
+  c(
+    Accuracy             = unname(cm$overall["Accuracy"]),
+    `Balanced accuracy`  = unname(cm$byClass["Balanced Accuracy"]),
+    Sensitivity          = unname(cm$byClass["Sensitivity"]),
+    Specificity          = unname(cm$byClass["Specificity"]),
+    PPV                  = unname(cm$byClass["Pos Pred Value"]),
+    NPV                  = unname(cm$byClass["Neg Pred Value"]),
+    `F1 score`           = unname(cm$byClass["F1"]),
+    `Cohen's kappa`      = unname(cm$overall["Kappa"]),
+    AUC                  = as.numeric(auc(roc_obj))
+  )
+}
+
+metrics_tbl <- data.frame(
+  Metric          = names(get_metrics(cm_decision_tree, roc_tree)),
+  `Decision tree` = get_metrics(cm_decision_tree, roc_tree),
+  `Random forest` = get_metrics(CM_adjusted, roc_adjusted),
+  check.names = FALSE,
+  row.names = NULL
+)
+
+# LaTeX table: performance metrics
+kable(metrics_tbl, format = "latex", booktabs = TRUE, digits = 3,
+      caption = paste0("Test-set performance of the decision tree and tuned random forest ",
+                       "(CKD as positive class). DeLong test for AUC difference: p = 0.6599"),
+      label = "perf-metrics", align = "lcc") %>%
+  kable_styling(latex_options = "hold_position")
+
+combined_cm <- cbind(cm_decision_tree, CM_adjusted)
+
+# 3. LaTeX kable table
+combined_cm %>%
+  kbl(
+    format = "latex",
+    booktabs = TRUE,
+    col.names = c("Prediction", "No CKD", "CKD", "No CKD", "CKD"),
+    caption = "Comparison of Random Forest Confusion Matrices",
+    position = "h!"
+  ) %>%
+  # Add the top header spanning the respective model columns
+  add_header_above(c(" " = 1, "Decision Tree" = 2, "Tuned Random Forest" = 4))
 
 ```
 

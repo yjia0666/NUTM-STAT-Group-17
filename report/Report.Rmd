@@ -92,7 +92,8 @@ ckd_data <- df %>%
     menopause = case_when(
       FEMLSBC %in% c(1:4, 6) ~ 0,
       FEMLSBC == 5 ~ 1,
-      FEMLSBC == 9 ~ NA_real_
+      FEMLSBC == 9 ~ 2
+      
     )
   )
 ```
@@ -189,7 +190,7 @@ df_filter <- df_final %>%
     ),
     menopause = factor(
       menopause,
-      levels = c(0, 1)
+      levels = c(0, 1, 2)
     ),
     across(
       c(

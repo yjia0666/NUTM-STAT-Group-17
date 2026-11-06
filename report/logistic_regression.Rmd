@@ -51,7 +51,7 @@ ckd_data <- df_filter %>%
       labels = c("0", "1")
     )
   ) %>%
-  select(
+  dplyr::select(
     -low_alcohol_beer,
     -mid_strength_beer,
     -full_strength_beer,
@@ -136,11 +136,53 @@ cat(latex_table)
 ```
 
 ```{r}
-ckd_data_filter <- ckd_data %>%
+ckd_data_menopausewomen_men <- ckd_data %>%
   filter(
-    sex == "Female",
-    !is.na(menopause)
-  )
+    !menopause == "0"
+      )
+
+model_menopausewomenmen <- glm(ckd ~ age + alcohol_quantity * sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data_menopausewomen_men, family = binomial)
+
+
+model_menopausesummary <- summary(model_menopausewomenmen)$coefficients
+
+results_pretty <- data.frame(
+  Variable = rownames(model_menopausesummary),
+
+  OR = exp(model_menopausesummary[, "Estimate"]),
+
+  `95% CI` = paste0(
+    sprintf("%.2f", exp(model_menopausesummary[, "Estimate"] -
+                         1.96 * model_menopausesummary[, "Std. Error"])),
+    "–",
+    sprintf("%.2f", exp(model_menopausesummary[, "Estimate"] +
+                         1.96 * model_menopausesummary[, "Std. Error"]))
+  ),
+
+  `P-value` = ifelse(
+    model_menopausesummary[, "Pr(>|z|)"] < 0.001,
+    "<0.001",
+    sprintf("%.3f", model_menopausesummary[, "Pr(>|z|)"])
+  ),
+
+  check.names = FALSE
+)
+
+results_pretty$OR <- sprintf("%.2f", results_pretty$OR)
+
+print(results_pretty, row.names = FALSE)
+
+
+ckd_data_nomenopausewomen_men <- ckd_data %>%
+  filter(
+    !menopause == "1"
+      )
+
+model_nomenopausewomenmen <- glm(ckd ~ age + alcohol_quantity * sex + alcohol_frequency + diabetes + beer + wine + spirits_liqueurs + cider + cocktails, data = ckd_data_nomenopausewomen_men, family = binomial)
+
+
+summary(model_nomenopausewomenmen)
+
 ```
 
 
