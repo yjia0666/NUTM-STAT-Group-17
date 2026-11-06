@@ -16,6 +16,7 @@ library(knitr)
 library(kableExtra)
 library(ggplot2)
 library(ggeffects)
+library(here)
 ```
 
 ```{r}
@@ -185,10 +186,6 @@ summary(model_nomenopausewomenmen)
 
 ```
 
-```{r}
-table(ckd_data$sex, ckd_data$menopause, cut(ckd_data$age, c(37,42,47,52,57, 62, 67,72, 77,82,85)))
-
-```
 
 # Logistic Regression
 ## Model Specification
@@ -211,10 +208,13 @@ $$
 ### Linearity in the logit
 
 ```{r,echo=FALSE}
+png(here("figures", "LR_linearity.png"))
+par(mfrow = c(2, 2))
+
 plot(
   ckd_data$alcohol_quantity,
   model_int$linear.predictors,
-  main = "Alcohol Quantity and the Linear Predictor of CKD",
+  main = "Alcohol Quantity",
   xlab = "Alcohol quantity",
   ylab = "Linear predictor (logit)",
   pch = 16,
@@ -230,13 +230,12 @@ lines(
   col = "steelblue2",
   lwd = 2
 )
-```
 
-```{r, echo=FALSE}
+
 plot(
   ckd_data$age,
   model_int$linear.predictors,
-  main = "Age and the Linear Predictor of CKD",
+  main = "Age",
   xlab = "Age",
   ylab = "Linear predictor (logit)",
   pch = 16,
@@ -252,13 +251,11 @@ lines(
   col = "steelblue2",
   lwd = 2
 )
-```
 
-```{r,echo=FALSE}
 plot(
   ckd_data$alcohol_frequency,
   model_int$linear.predictors,
-  main = "Alcohol Frequency and the Linear Predictor of CKD",
+  main = "Alcohol Frequency",
   xlab = "Alcohol frequency",
   ylab = "Linear predictor (logit)",
   pch = 16,
@@ -274,6 +271,16 @@ lines(
   col = "steelblue2",
   lwd = 2
 )
+
+mtext(
+  "Continuous Predictors and the Linear Predictor of CKD",
+  outer = TRUE,
+  cex = 1.1,
+  font = 2
+)
+
+par(mfrow = c(1, 1))
+dev.off()
 ```
 
 
@@ -298,6 +305,8 @@ cd <- cooks.distance(model_int)
 
 ```{r,echo=FALSE}
 top5 <- order(cd, decreasing = TRUE)[1:5]
+
+png(here("figures", "Cook's_distance.png"))
 
 plot(
   1:length(cd), cd,
@@ -326,6 +335,7 @@ text(
   col = "steelblue",
   cex = 0.8
 )
+dev.off()
 ```
 
 ```{r,echo=FALSE}
@@ -560,17 +570,6 @@ anova(model_smoking_reduced, model_smoking_interaction,test = "LRT")
 ```{r}
 model_menopause <- glm(ckd ~ age + alcohol_quantity * menopause + alcohol_frequency + diabetes, data = ckd_data_filter, family = binomial)
 summary(model_menopause)
-```
-```{r}
-effect_female <- subset(
-  effect_data_female,
-  group == "Female"
-)
-effect_data_menopause <- ggpredict(
-  model_menopause,
-  terms = c("alcohol_quantity", "menopause")
-)
-
 ```
 
 
